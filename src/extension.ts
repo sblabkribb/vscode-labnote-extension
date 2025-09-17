@@ -1,3 +1,5 @@
+// vscode-labnote-extension/src/extension.ts
+
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -71,26 +73,17 @@ export function activate(context: vscode.ExtensionContext) {
                     const newMatch = newBaseName.match(/^(\d{3})_/);
 
                     if (oldMatch && newMatch && oldMatch[1] !== newMatch[1]) {
-                        const oldPrefix = oldMatch[1];
-                        const newPrefix = newMatch[1];
                         const dir = path.dirname(newPath);
-
-                        // README.md의 링크 업데이트
                         const readmePath = path.join(dir, 'README.md');
                         if (fs.existsSync(readmePath)) {
-                            let content = fs.readFileSync(readmePath, 'utf-8');
-                            const oldLinkRegex = new RegExp(`\\[ \\] \\[[^]]*\\]\\(\\. recounted/${oldBaseName}\\)`, "g");
-                            if (oldLinkRegex.test(content)) {
-                                const readmeUri = vscode.Uri.file(readmePath);
-                                const doc = await vscode.workspace.openTextDocument(readmeUri);
-
-                                for (let i = 0; i < doc.lineCount; i++) {
-                                    const line = doc.lineAt(i);
-                                    if (line.text.includes(oldBaseName)) {
-                                        const newText = line.text.replace(oldBaseName, newBaseName)
-                                                                .replace(new RegExp(`^(\\[ \\] \\[)${oldPrefix}`), `$1${newPrefix}`);
-                                        edit.replace(readmeUri, line.range, newText);
-                                    }
+                            const readmeUri = vscode.Uri.file(readmePath);
+                            const doc = await vscode.workspace.openTextDocument(readmeUri);
+                            for (let i = 0; i < doc.lineCount; i++) {
+                                const line = doc.lineAt(i);
+                                if (line.text.includes(oldBaseName)) {
+                                    const newText = line.text.replace(oldBaseName, newBaseName)
+                                                            .replace(new RegExp(`^(\\[ \\] \\[)${oldMatch[1]}`), `$1${newMatch[1]}`);
+                                    edit.replace(readmeUri, line.range, newText);
                                 }
                             }
                         }
@@ -100,7 +93,6 @@ export function activate(context: vscode.ExtensionContext) {
             await vscode.workspace.applyEdit(edit);
         })
     );
-
 
     // --- 명령어 등록 ---
     context.subscriptions.push(
@@ -118,7 +110,7 @@ export function activate(context: vscode.ExtensionContext) {
                 prompt: 'AI에게 질문할 내용을 입력하세요.',
                 placeHolder: '예: CRISPR-Cas9 시스템에 대해 설명해줘'
             }).then(userInput => {
-                if (userInput) callChatApi(userInput, outputChannel);
+                if (userInput) callChatApi(userInput, outputChannel, null); // Command Palette에서는 대화 ID 없이 호출
             });
         }),
         vscode.commands.registerCommand('labnote.manager.newWorkflow', async () => {
@@ -128,19 +120,15 @@ export function activate(context: vscode.ExtensionContext) {
                     vscode.window.showErrorMessage("이 명령어는 'labnote/<번호>_주제/README.md' 파일에서만 실행할 수 있습니다.");
                     return;
                 }
-
                 const customWorkflowsContent = realFsProvider.readTextFile(customWorkflowsPath);
                 const workflowItems = logic.parseWorkflows(customWorkflowsContent);
                 const selectedWorkflow = await vscode.window.showQuickPick(workflowItems, { placeHolder: "Select a standard workflow" });
                 if (!selectedWorkflow) return;
-
                 const description = await vscode.window.showInputBox({ prompt: `Enter a specific description for "${selectedWorkflow.label}"` });
                 if (description === undefined) return;
-
                 const result = logic.createNewWorkflow(realFsProvider, activeUri.fsPath, selectedWorkflow, description);
-
                 const doc = await vscode.workspace.openTextDocument(activeUri);
-                const insertPos = findInsertPosBeforeEndMarker(doc, 'WORKFLOW_LIST_END');
+                const insertPos = findInsertPosBeforeEndMarker(doc, '');
                 const we = new vscode.WorkspaceEdit();
                 we.insert(activeUri, insertPos, result.textToInsert);
                 await vscode.workspace.applyEdit(we);
@@ -162,50 +150,24 @@ export function activate(context: vscode.ExtensionContext) {
                 { placeHolder: 'Select a template file to manage' }
             );
             if (!template) return;
-
-            const action = await vscode.window.showQuickPick(
-                [{ label: 'Edit File', description: 'Open the file for manual editing' }],
-                { placeHolder: `Select an action for '${template.label}'` }
-            );
-
-            if (action?.label === 'Edit File') {
-                await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(template.filePath));
-            }
+            const doc = await vscode.workspace.openTextDocument(template.filePath);
+            await vscode.window.showTextDocument(doc);
         }),
         vscode.commands.registerCommand('labnote.manager.insertTable', async () => {
             const editor = vscode.window.activeTextEditor;
-            if (!editor) {
-                vscode.window.showErrorMessage("표를 삽입하려면 활성화된 편집기가 필요합니다.");
-                return;
-            }
-
-            const columns = await vscode.window.showInputBox({
-                prompt: "생성할 표의 열(Column) 개수를 입력하세요.",
-                value: '3',
-                validateInput: text => /^[1-9]\d*$/.test(text) ? null : '유효한 숫자를 입력하세요.'
-            });
+            if (!editor) return;
+            const columns = await vscode.window.showInputBox({ prompt: "생성할 표의 열(Column) 개수:", value: '3' });
             if (!columns) return;
-
-            const rows = await vscode.window.showInputBox({
-                prompt: "생성할 표의 행(Row) 개수(헤더 제외)를 입력하세요.",
-                value: '2',
-                validateInput: text => /^[1-9]\d*$/.test(text) ? null : '유효한 숫자를 입력하세요.'
-            });
+            const rows = await vscode.window.showInputBox({ prompt: "생성할 표의 행(Row) 개수(헤더 제외):", value: '2' });
             if (!rows) return;
-
             const numCols = parseInt(columns, 10);
             const numRows = parseInt(rows, 10);
-
-            let table = '\n';
-            table += `| ${Array(numCols).fill('Header').map((h, i) => `${h} ${i + 1}`).join(' | ')} |\n`;
+            let table = `\n| ${Array(numCols).fill('Header').join(' | ')} |\n`;
             table += `| ${Array(numCols).fill('---').join(' | ')} |\n`;
             for (let i = 0; i < numRows; i++) {
                 table += `| ${Array(numCols).fill(' ').join(' | ')} |\n`;
             }
-
-            editor.edit(editBuilder => {
-                editBuilder.insert(editor.selection.active, table);
-            });
+            editor.edit(editBuilder => editBuilder.insert(editor.selection.active, table));
         }),
         vscode.commands.registerCommand('labnote.manager.reorderWorkflows', async () => {
             const activeUri = getActiveFileUri();
@@ -225,6 +187,61 @@ export function activate(context: vscode.ExtensionContext) {
             await reorderLabnoteFolders(labnoteRoot);
         })
     );
+
+    // --- 🚀 Copilot Chat Participant 등록 ---
+    // 1. Chat Participant 핸들러 정의
+    const handler: vscode.ChatRequestHandler = async (
+        request: vscode.ChatRequest,
+        chatContext: vscode.ChatContext,
+        stream: vscode.ChatResponseStream,
+        token: vscode.CancellationToken
+    ): Promise<vscode.ChatResult> => {
+        // 2. 사용자의 자연어 프롬프트 분석 및 라우팅
+        if (request.command === 'new') { // 예: @labnote /new
+            stream.markdown("새로운 연구노트 생성을 시작하겠습니다. 실험의 핵심 주제를 말씀해주세요. (예: `DmpR 센서 라이브러리 제작`)");
+            // 향후 이 부분에서 interactiveGenerateFlow 함수를 호출하는 로직으로 발전시킬 수 있습니다.
+        } else {
+            // 일반적인 Q&A 요청 처리
+            try {
+                stream.progress("LabNote AI 백엔드에 요청 중입니다...");
+                // Copilot Chat은 자체적으로 대화 기록을 관리하므로, 백엔드에 conversation_id를 넘겨줄 필요가 없습니다.
+                // 매번 새로운 대화로 간주하거나, 필요시 chatContext.history를 활용하여 직접 맥락을 구성할 수 있습니다.
+                const response = await callChatApi(request.prompt, outputChannel, null); // 항상 새 대화로 시작
+                if (response) {
+                    stream.markdown(response.response);
+                } else {
+                    stream.markdown("죄송합니다. AI로부터 응답을 받지 못했습니다.");
+                }
+            } catch (error: any) {
+                const errorMessage = `오류가 발생했습니다: ${error.message}`;
+                stream.markdown(errorMessage);
+                outputChannel.appendLine(`[Copilot Chat ERROR] ${errorMessage}`);
+            }
+        }
+        return { metadata: { command: request.command || "" } };
+    };
+
+    // 3. VSCode에 Chat Participant 등록
+    const participant = vscode.chat.createChatParticipant('labnote.participant', handler);
+
+    // 4. 아이콘, 설명 등 추가 설정
+    // icon.png가 'vscode-labnote-extension/images/icon.png' 경로에 있다고 가정합니다.
+    participant.iconPath = vscode.Uri.file(path.join(context.extensionPath, 'images', 'icon.png'));
+    participant.followupProvider = {
+        provideFollowups(result: vscode.ChatResult, context: vscode.ChatContext, token: vscode.CancellationToken) {
+            // 후속 질문 제안
+            return [{
+                prompt: '새 연구노트 생성',
+                label: '새 연구노트 생성하기',
+                command: 'new'
+            },{
+                prompt: '현재 실험 주제와 가장 관련있는 SOP 3개를 찾아줘',
+                label: '관련 SOP 검색하기',
+            }];
+        }
+    };
+
+    context.subscriptions.push(participant);
 }
 
 export function deactivate() {}
@@ -666,12 +683,13 @@ async function populateSectionFlow(extensionContext: vscode.ExtensionContext, ou
     }
 }
 
-async function callChatApi(userInput: string, outputChannel: vscode.OutputChannel) {
-    await vscode.window.withProgress({
+async function callChatApi(userInput: string, outputChannel: vscode.OutputChannel, conversationId: string | null): Promise<ChatResponse | null> {
+    // withProgress가 Promise를 반환하므로, 이를 직접 반환하거나 await 할 수 있습니다.
+    return vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
         title: "LabNote AI가 응답 중입니다...",
         cancellable: false
-    }, async (progress) => {
+    }, async (progress): Promise<ChatResponse | null> => { // 반환 타입을 명시해주는 것이 좋습니다.
         try {
             progress.report({ increment: 20, message: "AI에게 질문하는 중..." });
             const config = vscode.workspace.getConfiguration('labnote.ai');
@@ -681,7 +699,10 @@ async function callChatApi(userInput: string, outputChannel: vscode.OutputChanne
             const response = await fetch(`${baseUrl}/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query: userInput }),
+                body: JSON.stringify({
+                    query: userInput,
+                    conversation_id: conversationId
+                }),
             });
 
             if (!response.ok) {
@@ -690,15 +711,20 @@ async function callChatApi(userInput: string, outputChannel: vscode.OutputChanne
             }
             const chatData = await response.json() as ChatResponse;
 
-            const doc = await vscode.workspace.openTextDocument({
-                content: `# AI 답변: ${userInput}\n\n---\n\n${chatData.response}`,
-                language: 'markdown'
-            });
-            await vscode.window.showTextDocument(doc, { preview: false });
+            if (conversationId === null) {
+                const doc = await vscode.workspace.openTextDocument({
+                    content: `# AI 답변: ${userInput}\n\n---\n\n${chatData.response}`,
+                    language: 'markdown'
+                });
+                await vscode.window.showTextDocument(doc, { preview: false });
+            }
+            
+            return chatData; // 성공 시 데이터 반환
 
         } catch (error: any) {
             vscode.window.showErrorMessage('LabNote AI와 대화 중 오류가 발생했습니다.');
             outputChannel.appendLine(`[ERROR] ${error.message}`);
+            return null; // 오류 발생 시 null 반환
         }
     });
 }

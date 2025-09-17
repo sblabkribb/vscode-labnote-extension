@@ -24,6 +24,13 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "chatParticipants": [
+      {
+        "id": "labnote.participant",
+        "name": "labnote",
+        "description": "LabNote AI Assistant와 대화하여 연구노트를 작성하고 관리합니다."
+      }
+    ],
     "commands": [
       {
         "command": "labnote.ai.generate",
