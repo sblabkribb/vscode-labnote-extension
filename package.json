@@ -1,0 +1,124 @@
+{
+  "name": "labnote-ai-assistant",
+  "displayName": "LabNote AI Assistant",
+  "description": "An AI assistant to help with writing lab notes in VS Code.",
+  "version": "2.2.0",
+  "publisher": "BiofoundryLabs",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:labnote.ai.generate",
+    "onCommand:labnote.manager.newWorkflow",
+    "onCommand:labnote.manager.newHwUnitOperation",
+    "onCommand:labnote.manager.newSwUnitOperation",
+    "onCommand:labnote.manager.manageTemplates",
+    "onCommand:labnote.ai.populateSection",
+    "onCommand:labnote.ai.chat",
+    "onCommand:labnote.manager.insertTable",
+    "onCommand:labnote.manager.reorderWorkflows",
+    "onCommand:labnote.manager.reorderLabnotes"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "labnote.ai.generate",
+        "title": "LabNote: 새 연구노트 생성"
+      },
+      {
+        "command": "labnote.manager.newWorkflow",
+        "title": "LabNote: 새 워크플로우 추가"
+      },
+      {
+        "command": "labnote.manager.newHwUnitOperation",
+        "title": "LabNote: HW Unit Operation 추가"
+      },
+      {
+        "command": "labnote.manager.newSwUnitOperation",
+        "title": "LabNote: SW Unit Operation 추가"
+      },
+      {
+        "command": "labnote.manager.manageTemplates",
+        "title": "LabNote: 템플릿 관리"
+      },
+      {
+        "command": "labnote.ai.populateSection",
+        "title": "LabNote (AI): 섹션 내용 채우기"
+      },
+      {
+        "command": "labnote.ai.chat",
+        "title": "LabNote (AI): 일반 대화 시작"
+      },
+      {
+        "command": "labnote.manager.insertTable",
+        "title": "LabNote: 표 삽입"
+      },
+      {
+        "command": "labnote.manager.reorderWorkflows",
+        "title": "LabNote: 워크플로우 번호 재정렬"
+      },
+      {
+        "command": "labnote.manager.reorderLabnotes",
+        "title": "LabNote: 실험 폴더 번호 재정렬"
+      }
+    ],
+    "configuration": {
+      "title": "LabNote AI Assistant",
+      "properties": {
+        "labnote.ai.backendUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8000",
+          "description": "The base URL of the LabNote AI backend server (e.g., http://127.0.0.1:8000)."
+        },
+        "labnote.manager.workflowsPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to your custom workflows markdown file. Leave empty to use the default."
+        },
+        "labnote.manager.hwUnitOperationsPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to your custom hardware unit operations markdown file. Leave empty to use the default."
+        },
+        "labnote.manager.swUnitOperationsPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to your custom software unit operations markdown file. Leave empty to use the default."
+        }
+      }
+    }
+  },
+  "configurationDefaults": {
+    "[markdown]": {
+      "markdown.copyFiles.destination": {
+        "**/*.{png,jpg,jpeg,gif,svg,webp}": "images/${documentBaseName.substring(0, 3)}/",
+        "**/*": "resources/${documentBaseName.substring(0, 3)}/"
+      },
+      "markdown.updateLinksOnFileMove.enabled": "always"
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./ && node ./copy-resources.js",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "18.x",
+    "@types/node-fetch": "^2.6.11",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.19.1",
+    "@typescript-eslint/parser": "^6.19.1",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "node-fetch": "^2.7.0"
+  }
+}
