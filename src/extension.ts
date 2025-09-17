@@ -10,7 +10,13 @@ const fetch = require('node-fetch');
 
 // API 응답 타입 정의
 interface ChatResponse { response: string; conversation_id: string; }
-interface PopulateResponse { uo_id: string; section: string; options: string[]; }
+// ⭐️ 변경점: supervisor_evaluations 필드를 옵셔널로 추가하여 타입 에러를 해결합니다.
+interface PopulateResponse { 
+    uo_id: string; 
+    section: string; 
+    options: string[];
+    supervisor_evaluations?: any[]; // Supervisor 평가 결과를 받을 수 있도록 추가
+}
 interface SectionContext {
     uoId: string;
     section: string;
@@ -609,6 +615,7 @@ async function populateSectionFlow(extensionContext: vscode.ExtensionContext, ou
         }
 
         const { uoId, section, query, fileContent, placeholderRange } = sectionContext;
+        const currentFilePath = editor.document.uri.fsPath;
         outputChannel.appendLine(`[Action] Populate section request for UO '${uoId}', Section '${section}'`);
 
         await vscode.window.withProgress({
@@ -663,7 +670,9 @@ async function populateSectionFlow(extensionContext: vscode.ExtensionContext, ou
                                 chosen_edited,
                                 rejected: rejectedOptions,
                                 query,
-                                file_content: editor.document.getText() 
+                                file_content: editor.document.getText(),
+                                file_path: currentFilePath, // 파일 경로 전송
+                                supervisor_evaluations: populateData.supervisor_evaluations || [] // 평가 결과 전송
                             })
                         }).catch((err: any) => {
                             outputChannel.appendLine(`[WARN] DPO 데이터 기록 실패: ${err.message}`);

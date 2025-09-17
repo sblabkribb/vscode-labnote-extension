@@ -558,6 +558,7 @@ async function populateSectionFlow(extensionContext, outputChannel) {
             return;
         }
         const { uoId, section, query, fileContent, placeholderRange } = sectionContext;
+        const currentFilePath = editor.document.uri.fsPath;
         outputChannel.appendLine(`[Action] Populate section request for UO '${uoId}', Section '${section}'`);
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
@@ -603,7 +604,9 @@ async function populateSectionFlow(extensionContext, outputChannel) {
                             chosen_edited,
                             rejected: rejectedOptions,
                             query,
-                            file_content: editor.document.getText()
+                            file_content: editor.document.getText(),
+                            file_path: currentFilePath, // 파일 경로 전송
+                            supervisor_evaluations: populateData.supervisor_evaluations || [] // 평가 결과 전송
                         })
                     }).catch((err) => {
                         outputChannel.appendLine(`[WARN] DPO 데이터 기록 실패: ${err.message}`);
