@@ -48,6 +48,18 @@ const realFsProvider = {
     readTextFile: (p) => fs.readFileSync(p, 'utf-8'),
     writeTextFile: (p, content) => fs.writeFileSync(p, content),
 };
+// --- ⭐️ API 요청 헤더를 생성하는 헬퍼 함수 ---
+function getApiHeaders() {
+    const config = vscode.workspace.getConfiguration('labnote.ai');
+    const token = config.get('vesslApiToken');
+    const headers = {
+        'Content-Type': 'application/json'
+    };
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+}
 // --- 확장 프로그램 활성화 ---
 function activate(context) {
     const outputChannel = vscode.window.createOutputChannel("LabNote AI");
@@ -196,20 +208,14 @@ function activate(context) {
         await reorderLabnoteFolders(labnoteRoot);
     }));
     // --- 🚀 Copilot Chat Participant 등록 ---
-    // 1. Chat Participant 핸들러 정의
     const handler = async (request, chatContext, stream, token) => {
-        // 2. 사용자의 자연어 프롬프트 분석 및 라우팅
-        if (request.command === 'new') { // 예: @labnote /new
+        if (request.command === 'new') {
             stream.markdown("새로운 연구노트 생성을 시작하겠습니다. 실험의 핵심 주제를 말씀해주세요. (예: `DmpR 센서 라이브러리 제작`)");
-            // 향후 이 부분에서 interactiveGenerateFlow 함수를 호출하는 로직으로 발전시킬 수 있습니다.
         }
         else {
-            // 일반적인 Q&A 요청 처리
             try {
                 stream.progress("LabNote AI 백엔드에 요청 중입니다...");
-                // Copilot Chat은 자체적으로 대화 기록을 관리하므로, 백엔드에 conversation_id를 넘겨줄 필요가 없습니다.
-                // 매번 새로운 대화로 간주하거나, 필요시 chatContext.history를 활용하여 직접 맥락을 구성할 수 있습니다.
-                const response = await callChatApi(request.prompt, outputChannel, null); // 항상 새 대화로 시작
+                const response = await callChatApi(request.prompt, outputChannel, null);
                 if (response) {
                     stream.markdown(response.response);
                 }
@@ -225,14 +231,10 @@ function activate(context) {
         }
         return { metadata: { command: request.command || "" } };
     };
-    // 3. VSCode에 Chat Participant 등록
     const participant = vscode.chat.createChatParticipant('labnote.participant', handler);
-    // 4. 아이콘, 설명 등 추가 설정
-    // icon.png가 'vscode-labnote-extension/images/icon.png' 경로에 있다고 가정합니다.
     participant.iconPath = vscode.Uri.file(path.join(context.extensionPath, 'images', 'icon.png'));
     participant.followupProvider = {
         provideFollowups(result, context, token) {
-            // 후속 질문 제안
             return [{
                     prompt: '새 연구노트 생성',
                     label: '새 연구노트 생성하기',
@@ -247,7 +249,6 @@ function activate(context) {
 }
 function deactivate() { }
 // --- Helper Functions ---
-// --- 실험 폴더 재정렬 로직 ---
 async function reorderLabnoteFolders(labnoteRoot) {
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
@@ -292,12 +293,10 @@ async function reorderLabnoteFolders(labnoteRoot) {
             }
             progress.report({ increment: 30, message: "이름 변경 계획 수립 중..." });
             const edit = new vscode.WorkspaceEdit();
-            // 임시 이름으로 먼저 변경 (이름 충돌 방지)
             for (const r of renames) {
                 edit.renameFile(vscode.Uri.file(r.oldPath), vscode.Uri.file(r.newPath + '.tmp'), { overwrite: true });
             }
             await vscode.workspace.applyEdit(edit);
-            // 최종 이름으로 변경
             const finalEdit = new vscode.WorkspaceEdit();
             for (const r of renames) {
                 finalEdit.renameFile(vscode.Uri.file(r.newPath + '.tmp'), vscode.Uri.file(r.newPath), { overwrite: true });
@@ -330,14 +329,12 @@ function findInsertPosBeforeEndMarker(doc, endMarker) {
     for (let i = doc.lineCount - 1; i >= 0; i--) {
         const line = doc.lineAt(i);
         if (line.text.includes(endMarker)) {
-            // 주석 바로 앞 빈 줄에 삽입
             if (i > 0 && doc.lineAt(i - 1).isEmptyOrWhitespace) {
                 return new vscode.Position(i - 1, 0);
             }
             return new vscode.Position(i, 0);
         }
     }
-    // 마커를 찾지 못하면 파일 끝에 추가
     return new vscode.Position(doc.lineCount, 0);
 }
 function createUnitOperationCommand(fsProvider, uoFilePath) {
@@ -417,7 +414,6 @@ async function reorderWorkflowFiles(readmePath) {
                 return;
             }
             progress.report({ increment: 30, message: "이름 변경 계획 수립 중..." });
-            // 임시 이름으로 먼저 변경하여 이름 충돌 방지
             const tempRenameQueue = renameQueue.map(item => ({
                 oldUri: vscode.Uri.file(item.oldPath),
                 newUri: vscode.Uri.file(item.newPath + ".tmp")
@@ -426,7 +422,6 @@ async function reorderWorkflowFiles(readmePath) {
                 edit.renameFile(item.oldUri, item.newUri, { overwrite: true });
             }
             await vscode.workspace.applyEdit(edit);
-            // 실제 이름으로 변경
             const finalEdit = new vscode.WorkspaceEdit();
             const finalRenameQueue = renameQueue.map(item => ({
                 oldUri: vscode.Uri.file(item.newPath + ".tmp"),
@@ -437,7 +432,6 @@ async function reorderWorkflowFiles(readmePath) {
             }
             await vscode.workspace.applyEdit(finalEdit);
             progress.report({ increment: 70, message: "README.md 링크 업데이트 중..." });
-            // README.md 업데이트
             const readmeUri = vscode.Uri.file(readmePath);
             const readmeDoc = await vscode.workspace.openTextDocument(readmeUri);
             let readmeContent = readmeDoc.getText();
@@ -446,8 +440,6 @@ async function reorderWorkflowFiles(readmePath) {
                 const newBase = path.basename(item.newPath);
                 const oldPrefix = oldBase.substring(0, 3);
                 const newPrefix = newBase.substring(0, 3);
-                // 정규표현식을 사용하여 링크와 텍스트를 동시에 업데이트
-                // 예: [ ] [002 ...](./002_...) -> [ ] [001 ...](./001_...)
                 const regex = new RegExp(`(\\[ \\] \\[)${oldPrefix}(.*?\\].*?\\s*\\()\\.\\/${oldBase}(\\))`, "g");
                 readmeContent = readmeContent.replace(regex, `$1${newPrefix}$2./${newBase}$3`);
             }
@@ -507,7 +499,7 @@ async function interactiveGenerateFlow(userInput, outputChannel) {
             progress.report({ increment: 60, message: "연구노트 및 워크플로우 파일 생성 중..." });
             const createScaffoldResponse = await fetch(`${baseUrl}/create_scaffold`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getApiHeaders(), // ⭐️ 변경점
                 body: JSON.stringify({ query: userInput, workflow_id: finalWorkflowId, unit_operation_ids: finalUoIds, experimenter: "AI Assistant" }),
             });
             if (!createScaffoldResponse.ok)
@@ -531,9 +523,7 @@ async function interactiveGenerateFlow(userInput, outputChannel) {
         }
     });
 }
-// ⭐️ 변경점: 약관 동의 및 새로운 Webview 플로우 적용
 async function populateSectionFlow(extensionContext, outputChannel) {
-    // 1. 약관 동의 확인
     const consent = extensionContext.globalState.get('labnoteAiConsent');
     if (consent !== 'given') {
         const selection = await vscode.window.showInformationMessage('LabNote AI 성능 향상을 위해, 사용자가 선택하고 수정한 내용을 익명화하여 모델 학습에 사용합니다. 이에 동의하십니까? 자세한 내용은 프로젝트 README의 "데이터 활용 및 저작권 정책"을 참고해주세요.', { modal: true }, '동의', '거부');
@@ -572,7 +562,7 @@ async function populateSectionFlow(extensionContext, outputChannel) {
                 throw new Error("Backend URL이 설정되지 않았습니다.");
             const populateResponse = await fetch(`${baseUrl}/populate_note`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getApiHeaders(), // ⭐️ 변경점
                 body: JSON.stringify({ file_content: fileContent, uo_id: uoId, section, query })
             });
             if (!populateResponse.ok) {
@@ -587,16 +577,13 @@ async function populateSectionFlow(extensionContext, outputChannel) {
             panel.webview.onDidReceiveMessage(async (message) => {
                 if (message.command === 'applyAndLearn') {
                     const { chosen_original, chosen_edited } = message;
-                    // 사용자가 선택하지 않은 나머지 옵션들을 'rejected'로 구성
                     const rejectedOptions = populateData.options.filter(opt => opt !== chosen_original);
-                    // 1. 에디터에 수정된 내용 적용
                     await editor.edit(editBuilder => {
                         editBuilder.replace(placeholderRange, chosen_edited);
                     });
-                    // 2. DPO 데이터 전송
                     fetch(`${baseUrl}/record_preference`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: getApiHeaders(), // ⭐️ 변경점
                         body: JSON.stringify({
                             uo_id: uoId,
                             section,
@@ -605,8 +592,8 @@ async function populateSectionFlow(extensionContext, outputChannel) {
                             rejected: rejectedOptions,
                             query,
                             file_content: editor.document.getText(),
-                            file_path: currentFilePath, // 파일 경로 전송
-                            supervisor_evaluations: populateData.supervisor_evaluations || [] // 평가 결과 전송
+                            file_path: currentFilePath,
+                            supervisor_evaluations: populateData.supervisor_evaluations || []
                         })
                     }).catch((err) => {
                         outputChannel.appendLine(`[WARN] DPO 데이터 기록 실패: ${err.message}`);
@@ -623,7 +610,6 @@ async function populateSectionFlow(extensionContext, outputChannel) {
     }
 }
 async function callChatApi(userInput, outputChannel, conversationId) {
-    // withProgress가 Promise를 반환하므로, 이를 직접 반환하거나 await 할 수 있습니다.
     return vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
         title: "LabNote AI가 응답 중입니다...",
@@ -637,7 +623,7 @@ async function callChatApi(userInput, outputChannel, conversationId) {
                 throw new Error("Backend URL이 설정되지 않았습니다.");
             const response = await fetch(`${baseUrl}/chat`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getApiHeaders(), // ⭐️ 변경점
                 body: JSON.stringify({
                     query: userInput,
                     conversation_id: conversationId
@@ -655,30 +641,26 @@ async function callChatApi(userInput, outputChannel, conversationId) {
                 });
                 await vscode.window.showTextDocument(doc, { preview: false });
             }
-            return chatData; // 성공 시 데이터 반환
+            return chatData;
         }
         catch (error) {
             vscode.window.showErrorMessage('LabNote AI와 대화 중 오류가 발생했습니다.');
             outputChannel.appendLine(`[ERROR] ${error.message}`);
-            return null; // 오류 발생 시 null 반환
+            return null;
         }
     });
 }
 // --- Webview and Context Finding Functions ---
-// ⭐️ 변경점: 수정 기능을 포함하는 새로운 Webview HTML 생성
 function createPopulateWebviewPanel(section, options) {
     const panel = vscode.window.createWebviewPanel('labnoteAiPopulate', `AI 제안: ${section}`, vscode.ViewColumn.Beside, {
         enableScripts: true,
-        // Webview가 닫혀도 상태를 유지하도록 설정
         retainContextWhenHidden: true
     });
     panel.webview.html = getWebviewContent(section, options);
     return panel;
 }
-// ⭐️ 변경점: Webview 콘텐츠를 수정 기능에 맞게 대폭 수정
 function getWebviewContent(section, options) {
     const optionCards = options.map((option, index) => {
-        // HTML 렌더링을 위해 특수 문자를 이스케이프하고, 내용을 base64로 인코딩하여 데이터 속성에 저장
         const escapedOption = option.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const encodedOption = Buffer.from(option).toString('base64');
         return `<div class="option-card" data-index="${index}" data-original-content="${encodedOption}">
@@ -727,15 +709,10 @@ function getWebviewContent(section, options) {
 
             cards.forEach(card => {
                 card.addEventListener('click', () => {
-                    // 이전에 선택된 카드 스타일 초기화
                     cards.forEach(c => c.classList.remove('selected'));
                     card.classList.add('selected');
-
-                    // base64로 인코딩된 원본 내용을 디코딩하여 textarea에 설정
                     selectedOriginalContent = atob(card.dataset.originalContent);
                     editorTextarea.value = selectedOriginalContent;
-                    
-                    // 수정 창 표시
                     editorSection.style.display = 'block';
                 });
             });
@@ -801,7 +778,7 @@ function findSectionContext(document, position) {
 // --- Menu Functions ---
 async function fetchConstants(baseUrl, outputChannel) {
     try {
-        const response = await fetch(`${baseUrl}/constants`);
+        const response = await fetch(`${baseUrl}/constants`, { headers: getApiHeaders() }); // ⭐️ 변경점
         if (!response.ok) {
             throw new Error(`상수 fetch 실패 (HTTP ${response.status})`);
         }
