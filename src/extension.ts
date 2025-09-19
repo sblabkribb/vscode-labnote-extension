@@ -397,7 +397,7 @@ async function interactiveGenerateFlow(userInput: string, outputChannel: vscode.
     });
 }
 
-// --- 섹션 채우기 로직 (findSectionContext 함수만 수정됨) ---
+// --- 섹션 채우기 로직 ---
 
 /** 텍스트 에디터용 진입점 */
 async function populateSectionFlow(extensionContext: vscode.ExtensionContext, outputChannel: vscode.OutputChannel) {
@@ -447,7 +447,6 @@ async function processAndApplyPopulation(
     sectionContext: SectionContext,
     isFromWebview: boolean
 ) {
-    // 동의 확인 로직
     const consent = extensionContext.globalState.get('labnoteAiConsent');
     if (consent !== 'given') {
         const selection = await vscode.window.showInformationMessage(
@@ -539,7 +538,6 @@ async function processAndApplyPopulation(
     });
 }
 
-
 async function callChatApi(userInput: string, outputChannel: vscode.OutputChannel, conversationId: string | null): Promise<ChatResponse | null> {
     return vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
@@ -606,7 +604,6 @@ function resolveConfiguredPath(context: vscode.ExtensionContext, settingKey: str
 }
 
 async function reorderLabnoteFolders(labnoteRoot: string) {
-    // ... (이 함수의 내용은 변경되지 않았으므로 생략하지 않고 모두 포함)
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
         title: "실험 폴더 번호 재정렬 중...",
@@ -676,7 +673,6 @@ async function reorderLabnoteFolders(labnoteRoot: string) {
 }
 
 async function reorderWorkflowFiles(readmePath: string) {
-    // ... (이 함수의 내용은 변경되지 않았으므로 생략하지 않고 모두 포함)
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
         title: "워크플로우 번호 재정렬 중...",
@@ -894,6 +890,7 @@ function findSectionContext(document: vscode.TextDocument, positionOrContext: vs
 
     if (positionOrContext instanceof vscode.Position) {
         let sectionLineNum = -1;
+        // 1. 현재 커서 위치에서 위로 올라가며 가장 가까운 '####' 섹션 제목 찾기
         for (let i = positionOrContext.line; i >= 0; i--) {
             const lineText = document.lineAt(i).text;
             const sectionMatch = lineText.match(/^####\s*([A-Za-z\s&]+)/);
@@ -905,19 +902,20 @@ function findSectionContext(document: vscode.TextDocument, positionOrContext: vs
         }
         if (!section) return null;
 
+        // 2. 찾은 섹션에서 다시 위로 올라가며 가장 가까운 '### [U...]' Unit Operation ID 찾기
         for (let i = sectionLineNum - 1; i >= 0; i--) {
             const lineText = document.lineAt(i).text;
-            const uoMatch = lineText.match(/^###\s*\[(U[A-Z]{1,3}\d{3,4})/);
+            const uoMatch = lineText.match(/^###\s*\[(U[A-Z]{1,3}\d{3,4})\]/);
             if (uoMatch) {
                 uoId = uoMatch[1];
                 uoLineNum = i;
                 break;
             }
         }
-    } else {
+    } else { // 웹뷰에서 호출된 경우
         uoId = positionOrContext.uoId;
         section = positionOrContext.section;
-        const uoRegex = new RegExp(`^###\\s*\\[${uoId}`);
+        const uoRegex = new RegExp(`^###\\s*\\[${uoId}\\]`);
         for (let i = 0; i < document.lineCount; i++) {
             if (uoRegex.test(document.lineAt(i).text)) {
                 uoLineNum = i;
@@ -928,19 +926,26 @@ function findSectionContext(document: vscode.TextDocument, positionOrContext: vs
 
     if (!uoId || uoLineNum === -1) return null;
 
+    // 3. 찾은 섹션 아래에서 플레이스홀더 '(...' 텍스트 찾기
     const placeholderRegex = /^\s*(-\s*)?\(.*\)\s*$/;
     let sectionFound = false;
     const sectionRegex = new RegExp(`^####\\s*${section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
 
     for (let i = uoLineNum + 1; i < document.lineCount; i++) {
         const line = document.lineAt(i);
+        // 다른 Unit Operation을 만나면 검색 중단
         if (i > uoLineNum && line.text.startsWith('###')) break;
         
+        // 현재 섹션 제목을 찾으면 플래그 설정
         if (!sectionFound && sectionRegex.test(line.text)) {
             sectionFound = true;
             continue;
         }
 
+        // 다른 섹션을 만나면 검색 중단
+        if (sectionFound && line.text.startsWith('####')) break;
+
+        // 섹션을 찾은 후, 플레이스홀더를 찾으면 해당 라인의 범위를 저장하고 종료
         if (sectionFound && placeholderRegex.test(line.text)) {
             placeholderRange = line.range;
             break;
@@ -951,7 +956,6 @@ function findSectionContext(document: vscode.TextDocument, positionOrContext: vs
 
     return { uoId, section, query, fileContent, placeholderRange };
 }
-
 
 async function fetchConstants(baseUrl: string, outputChannel: vscode.OutputChannel): Promise<{ ALL_WORKFLOWS: { [id: string]: string }, ALL_UOS: { [id: string]: string } }> {
     try {

@@ -136,27 +136,30 @@ export class LabnoteEditorProvider implements vscode.CustomTextEditorProvider {
 
                         const uoHeadings = tempDiv.querySelectorAll('h3');
                         uoHeadings.forEach(h3 => {
-                            // ⭐️ [버그 수정] 잘못된 정규식을 올바르게 수정
-                            const match = h3.textContent.match(/\\[(U[A-Z]{1,3}\\d{3,4})/);
+                            // ⭐️ [버그 수정] 정규식을 수정하여 UO ID를 정확히 찾습니다. e.g. [UHW010]
+                            const match = h3.textContent.match(/\\[(U[A-Z]{2,3}\\d{3,4})\\]/);
                             if (match) {
                                 const uoId = match[1];
                                 let nextElement = h3.nextElementSibling;
                                 while(nextElement && nextElement.tagName !== 'H3') {
                                     if (nextElement.tagName === 'H4') {
-                                        if (nextElement.querySelector('.ai-fill-btn')) {
-                                            nextElement = nextElement.nextElementSibling;
-                                            continue;
-                                        }
-                                        const sectionName = Array.from(nextElement.childNodes).filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join('').trim();
-                                        if (sectionName) {
-                                            const button = document.createElement('button');
-                                            button.className = 'ai-fill-btn';
-                                            button.textContent = 'AI로 채우기';
-                                            button.onclick = (e) => {
-                                                e.stopPropagation();
-                                                vscode.postMessage({ type: 'populate', uoId: uoId, section: sectionName });
-                                            };
-                                            nextElement.appendChild(button);
+                                        // ⭐️ [로직 개선] 플레이스홀더가 있을 때만 버튼을 추가합니다.
+                                        const placeholder = nextElement.nextElementSibling;
+                                        const hasPlaceholder = placeholder && (placeholder.tagName === 'P' || placeholder.tagName === 'UL' || placeholder.tagName === 'LI') && placeholder.textContent.trim().startsWith('(');
+                                        
+                                        // ⭐️ [로직 개선] 버튼 중복 생성을 방지합니다.
+                                        if (hasPlaceholder && !nextElement.querySelector('.ai-fill-btn')) {
+                                            const sectionName = Array.from(nextElement.childNodes).filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join('').trim();
+                                            if (sectionName) {
+                                                const button = document.createElement('button');
+                                                button.className = 'ai-fill-btn';
+                                                button.textContent = 'AI로 채우기';
+                                                button.onclick = (e) => {
+                                                    e.stopPropagation();
+                                                    vscode.postMessage({ type: 'populate', uoId: uoId, section: sectionName });
+                                                };
+                                                nextElement.appendChild(button);
+                                            }
                                         }
                                     }
                                     nextElement = nextElement.nextElementSibling;

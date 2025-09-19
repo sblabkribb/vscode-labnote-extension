@@ -104,8 +104,13 @@ function registerCommands(context, outputChannel) {
                 interactiveGenerateFlow(userInput, outputChannel);
         });
     }), 
-    // 텍스트 에디터용 '섹션 채우기' 명령어
-    vscode.commands.registerCommand('labnote.ai.populateSection', () => populateSectionFlow(context, outputChannel)), vscode.commands.registerCommand('labnote.ai.chat', () => {
+    // ⭐️ '섹션 채우기' 명령어를 하나로 통합 (텍스트 에디터, 웹뷰 모두 처리)
+    vscode.commands.registerCommand('labnote.ai.populateSection', (contextOrUri, uoId, section) => {
+        // 이 함수는 텍스트 에디터와 웹뷰 양쪽에서 호출될 수 있습니다.
+        // 웹뷰: populateSectionFlow(context, outputChannel, documentUri, uoId, section)
+        // 텍스트: populateSectionFlow(context, outputChannel)
+        populateSectionFlow(context, outputChannel, contextOrUri, uoId, section);
+    }), vscode.commands.registerCommand('labnote.ai.chat', () => {
         vscode.window.showInputBox({
             prompt: 'AI에게 질문할 내용을 입력하세요.',
             placeHolder: '예: CRISPR-Cas9 시스템에 대해 설명해줘'
@@ -116,10 +121,6 @@ function registerCommands(context, outputChannel) {
     }), 
     // Manager Commands
     vscode.commands.registerCommand('labnote.manager.newWorkflow', () => newWorkflowCommand(customPaths.workflows)), vscode.commands.registerCommand('labnote.manager.newHwUnitOperation', createUnitOperationCommand(realFsProvider, customPaths.hwUnitOperations)), vscode.commands.registerCommand('labnote.manager.newSwUnitOperation', createUnitOperationCommand(realFsProvider, customPaths.swUnitOperations)), vscode.commands.registerCommand('labnote.manager.manageTemplates', () => manageTemplatesCommand(customPaths)), vscode.commands.registerCommand('labnote.manager.insertTable', insertTableCommand), vscode.commands.registerCommand('labnote.manager.reorderWorkflows', reorderWorkflowsCommand), vscode.commands.registerCommand('labnote.manager.reorderLabnotes', reorderLabnotesCommand));
-    // 웹뷰(Visual Editor) 전용 '섹션 채우기' 명령어
-    context.subscriptions.push(vscode.commands.registerCommand('labnote.ai.populateSection.webview', (documentUri, uoId, section) => {
-        populateSectionFromWebview(context, outputChannel, documentUri, uoId, section);
-    }));
 }
 function registerEventListeners(context) {
     context.subscriptions.push(vscode.workspace.onDidRenameFiles(async (e) => {
@@ -367,42 +368,51 @@ async function interactiveGenerateFlow(userInput, outputChannel) {
 }
 // --- 섹션 채우기 로직 (findSectionContext 함수만 수정됨) ---
 /** 텍스트 에디터용 진입점 */
-async function populateSectionFlow(extensionContext, outputChannel) {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) {
-        vscode.window.showWarningMessage("활성화된 텍스트 에디터가 없습니다. Visual Editor를 사용 중이라면 각 섹션의 'AI로 채우기' 버튼을 이용해주세요.");
+async function populateSectionFlow(extensionContext, outputChannel, contextOrUri, uoIdFromWebview, sectionFromWebview) {
+    let document;
+    let positionOrContext;
+    // 호출 소스(텍스트 에디터 vs 웹뷰) 판별
+    if (contextOrUri instanceof vscode.Uri && uoIdFromWebview && sectionFromWebview) {
+        // 웹뷰에서 호출된 경우
+        try {
+            document = await vscode.workspace.openTextDocument(contextOrUri);
+            positionOrContext = { uoId: uoIdFromWebview, section: sectionFromWebview };
+        }
+        catch (e) {
+            vscode.window.showErrorMessage(`파일을 여는 데 실패했습니다: ${e.message}`);
+            return;
+        }
+    }
+    else {
+        // 텍스트 에디터에서 호출된 경우
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showWarningMessage("활성화된 텍스트 에디터가 없습니다. Visual Editor를 사용 중이라면 각 섹션의 'AI로 채우기' 버튼을 이용해주세요.");
+            return;
+        }
+        document = editor.document;
+        positionOrContext = editor.selection.active;
+    }
+    if (!document) {
+        vscode.window.showErrorMessage("작업을 수행할 문서를 찾을 수 없습니다.");
         return;
     }
     try {
-        const sectionContext = findSectionContext(editor.document, editor.selection.active);
+        const sectionContext = findSectionContext(document, positionOrContext);
         if (!sectionContext) {
-            vscode.window.showErrorMessage("현재 커서 위치에서 채울 수 있는 Unit Operation 섹션(과 플레이스홀더)을 찾을 수 없습니다.");
+            vscode.window.showErrorMessage("현재 위치에서 채울 수 있는 Unit Operation 섹션(과 플레이스홀더)을 찾을 수 없습니다.");
             return;
         }
-        await processAndApplyPopulation(extensionContext, outputChannel, editor.document.uri, sectionContext, false);
+        // processAndApplyPopulation 함수는 기존과 동일하게 사용
+        await processAndApplyPopulation(extensionContext, outputChannel, document.uri, sectionContext);
     }
     catch (error) {
         vscode.window.showErrorMessage(`LabNote AI 작업 중 오류 발생: ${error.message}`);
     }
 }
-/** 웹뷰용 진입점 */
-async function populateSectionFromWebview(extensionContext, outputChannel, documentUri, uoId, section) {
-    try {
-        const document = await vscode.workspace.openTextDocument(documentUri);
-        const sectionContext = findSectionContext(document, { uoId, section });
-        if (!sectionContext) {
-            vscode.window.showErrorMessage(`'${section}' 섹션을 찾을 수 없습니다. (UO: ${uoId})`);
-            return;
-        }
-        await processAndApplyPopulation(extensionContext, outputChannel, documentUri, sectionContext, true);
-    }
-    catch (error) {
-        vscode.window.showErrorMessage(`LabNote AI 작업 중 오류 발생: ${error.message}`);
-    }
-}
-/** 공통 처리 로직 */
-async function processAndApplyPopulation(extensionContext, outputChannel, documentUri, sectionContext, isFromWebview) {
-    // 동의 확인 로직
+/** 공통 처리 로직 (isFromWebview 파라미터 제거) */
+async function processAndApplyPopulation(extensionContext, outputChannel, documentUri, sectionContext) {
+    // 동의 확인 로직 (기존과 동일)
     const consent = extensionContext.globalState.get('labnoteAiConsent');
     if (consent !== 'given') {
         const selection = await vscode.window.showInformationMessage('LabNote AI 성능 향상을 위해, 사용자가 선택하고 수정한 내용을 익명화하여 모델 학습에 사용합니다. 이에 동의하십니까? 자세한 내용은 프로젝트 README의 "데이터 활용 및 저작권 정책"을 참고해주세요.', { modal: true }, '동의', '거부');
@@ -444,19 +454,17 @@ async function processAndApplyPopulation(extensionContext, outputChannel, docume
         panel.webview.onDidReceiveMessage(async (message) => {
             if (message.command === 'applyAndLearn') {
                 const { chosen_original, chosen_edited } = message;
-                if (isFromWebview) {
-                    const md = require('markdown-it')();
-                    const htmlContent = md.render(chosen_edited);
-                    LabnoteEditorProvider_1.LabnoteEditorProvider.updateWebviewSection(documentUri, uoId, section, htmlContent);
+                // ⭐️ 수정된 내용 적용 로직 단순화
+                const document = await vscode.workspace.openTextDocument(documentUri);
+                const editor = await vscode.window.showTextDocument(document);
+                // placeholderRange를 다시 찾아서 적용 (더 안정적)
+                const freshContext = findSectionContext(document, { uoId, section });
+                if (freshContext && freshContext.placeholderRange) {
+                    await editor.edit(editBuilder => {
+                        editBuilder.replace(freshContext.placeholderRange, chosen_edited);
+                    });
                 }
-                else {
-                    const editor = vscode.window.activeTextEditor;
-                    if (editor && editor.document.uri.toString() === documentUri.toString()) {
-                        await editor.edit(editBuilder => {
-                            editBuilder.replace(placeholderRange, chosen_edited);
-                        });
-                    }
-                }
+                // DPO 데이터 기록 (기존과 동일)
                 fetch(`${baseUrl}/record_preference`, {
                     method: 'POST',
                     headers: getApiHeaders(),
@@ -480,44 +488,80 @@ async function processAndApplyPopulation(extensionContext, outputChannel, docume
         }, undefined, extensionContext.subscriptions);
     });
 }
-async function callChatApi(userInput, outputChannel, conversationId) {
-    return vscode.window.withProgress({
-        location: vscode.ProgressLocation.Notification,
-        title: "LabNote AI가 응답 중입니다...",
-        cancellable: false
-    }, async (progress) => {
-        try {
-            progress.report({ increment: 20, message: "AI에게 질문하는 중..." });
-            const baseUrl = getBaseUrl();
-            if (!baseUrl)
-                return null;
-            const response = await fetch(`${baseUrl}/chat`, {
-                method: 'POST',
-                headers: getApiHeaders(),
-                body: JSON.stringify({
-                    query: userInput,
-                    conversation_id: conversationId
-                }),
-            });
-            if (!response.ok) {
-                throw new Error(`채팅 실패 (HTTP ${response.status}): ${await response.text()}`);
+/**
+ * ⭐️ [최종 수정 함수]
+ * 텍스트 에디터와 웹뷰 모두에서 안정적으로 작동하도록 로직을 재구성했습니다.
+ * 이 코드로 완전히 교체해주세요.
+ */
+function findSectionContext(document, positionOrContext) {
+    const fileContent = document.getText();
+    const yamlMatch = fileContent.match(/^---\s*[\r\n]+title:\s*["']?(.*?)["']?[\r\n]+/);
+    const query = yamlMatch ? yamlMatch[1].replace(/\[AI Generated\]\s*/, '').trim() : "Untitled Experiment";
+    let uoId = "";
+    let section = "";
+    let uoLineNum = -1;
+    let sectionLineNum = -1;
+    if (positionOrContext instanceof vscode.Position) {
+        // [텍스트 에디터] 현재 커서 위치에서 위로 탐색
+        for (let i = positionOrContext.line; i >= 0; i--) {
+            const lineText = document.lineAt(i).text;
+            if (sectionLineNum === -1) { // 섹션을 아직 못 찾았다면
+                const sectionMatch = lineText.match(/^####\s*([A-Za-z\s&]+)/);
+                if (sectionMatch) {
+                    section = sectionMatch[1].trim();
+                    sectionLineNum = i;
+                }
             }
-            const chatData = await response.json();
-            if (conversationId === null) {
-                const doc = await vscode.workspace.openTextDocument({
-                    content: `# AI 답변: ${userInput}\n\n---\n\n${chatData.response}`,
-                    language: 'markdown'
-                });
-                await vscode.window.showTextDocument(doc, { preview: false });
+            else { // 섹션을 찾았다면 UO ID 탐색
+                const uoMatch = lineText.match(/^###\s*\[(U[A-Z]{2,3}\d{3,4})\]/);
+                if (uoMatch) {
+                    uoId = uoMatch[1];
+                    uoLineNum = i;
+                    break;
+                }
             }
-            return chatData;
         }
-        catch (error) {
-            vscode.window.showErrorMessage('LabNote AI와 대화 중 오류가 발생했습니다.');
-            outputChannel.appendLine(`[ERROR] ${error.message}`);
-            return null;
+    }
+    else {
+        // [웹뷰] 전달받은 정보로 직접 탐색
+        uoId = positionOrContext.uoId;
+        section = positionOrContext.section;
+        const uoRegex = new RegExp(`^###\\s*\\[${uoId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]`);
+        for (let i = 0; i < document.lineCount; i++) {
+            if (uoRegex.test(document.lineAt(i).text)) {
+                uoLineNum = i;
+                break;
+            }
         }
-    });
+    }
+    if (!uoId || uoLineNum === -1)
+        return null;
+    // UO ID를 기준으로 하위 섹션과 플레이스홀더를 정확히 찾기
+    const sectionRegex = new RegExp(`^####\\s*${section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
+    let inTargetSection = false;
+    for (let i = uoLineNum + 1; i < document.lineCount; i++) {
+        const line = document.lineAt(i);
+        const lineText = line.text;
+        // 다른 UO를 만나면 검색 종료
+        if (lineText.startsWith('###'))
+            break;
+        if (sectionRegex.test(lineText)) {
+            inTargetSection = true;
+            sectionLineNum = i;
+            continue;
+        }
+        // 다른 섹션을 만나면 해당 섹션 검색 종료
+        if (inTargetSection && lineText.startsWith('####')) {
+            break;
+        }
+        if (inTargetSection) {
+            const placeholderRegex = /^\s*(-\s*)?\(.*\)\s*$/;
+            if (placeholderRegex.test(lineText)) {
+                return { uoId, section, query, fileContent, placeholderRange: line.range };
+            }
+        }
+    }
+    return null; // 플레이스홀더를 못 찾은 경우
 }
 // --- 유틸리티 및 헬퍼 함수 ---
 function resolveConfiguredPath(context, settingKey, defaultFileName) {
@@ -603,7 +647,6 @@ async function reorderLabnoteFolders(labnoteRoot) {
     });
 }
 async function reorderWorkflowFiles(readmePath) {
-    // ... (이 함수의 내용은 변경되지 않았으므로 생략하지 않고 모두 포함)
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
         title: "워크플로우 번호 재정렬 중...",
@@ -799,6 +842,7 @@ function findSectionContext(document, positionOrContext) {
     let uoLineNum = -1;
     if (positionOrContext instanceof vscode.Position) {
         let sectionLineNum = -1;
+        // 1. 현재 커서 위치에서 위로 올라가며 가장 가까운 '####' 섹션 제목 찾기
         for (let i = positionOrContext.line; i >= 0; i--) {
             const lineText = document.lineAt(i).text;
             const sectionMatch = lineText.match(/^####\s*([A-Za-z\s&]+)/);
@@ -810,6 +854,7 @@ function findSectionContext(document, positionOrContext) {
         }
         if (!section)
             return null;
+        // 2. 찾은 섹션에서 다시 위로 올라가며 가장 가까운 '### [U...]' Unit Operation ID 찾기
         for (let i = sectionLineNum - 1; i >= 0; i--) {
             const lineText = document.lineAt(i).text;
             const uoMatch = lineText.match(/^###\s*\[(U[A-Z]{1,3}\d{3,4})/);
@@ -820,7 +865,7 @@ function findSectionContext(document, positionOrContext) {
             }
         }
     }
-    else {
+    else { // 웹뷰에서 호출된 경우
         uoId = positionOrContext.uoId;
         section = positionOrContext.section;
         const uoRegex = new RegExp(`^###\\s*\\[${uoId}`);
@@ -833,17 +878,21 @@ function findSectionContext(document, positionOrContext) {
     }
     if (!uoId || uoLineNum === -1)
         return null;
+    // 3. 찾은 섹션 아래에서 플레이스홀더 '(...' 텍스트 찾기
     const placeholderRegex = /^\s*(-\s*)?\(.*\)\s*$/;
     let sectionFound = false;
     const sectionRegex = new RegExp(`^####\\s*${section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
     for (let i = uoLineNum + 1; i < document.lineCount; i++) {
         const line = document.lineAt(i);
+        // 다른 Unit Operation을 만나면 검색 중단
         if (i > uoLineNum && line.text.startsWith('###'))
             break;
+        // 현재 섹션 제목을 찾으면 플래그 설정
         if (!sectionFound && sectionRegex.test(line.text)) {
             sectionFound = true;
             continue;
         }
+        // 섹션을 찾은 후, 플레이스홀더를 찾으면 해당 라인의 범위를 저장하고 종료
         if (sectionFound && placeholderRegex.test(line.text)) {
             placeholderRange = line.range;
             break;
