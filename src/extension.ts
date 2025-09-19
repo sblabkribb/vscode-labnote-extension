@@ -88,7 +88,6 @@ function registerCommands(context: vscode.ExtensionContext, outputChannel: vscod
             vscode.commands.executeCommand('vscode.openWith', uri, LabnoteEditorProvider.viewType);
         }),
 
-        // AI Commands
         vscode.commands.registerCommand('labnote.ai.generate', () => {
             vscode.window.showInputBox({
                 prompt: '생성할 연구노트의 핵심 내용을 입력하세요.',
@@ -97,7 +96,6 @@ function registerCommands(context: vscode.ExtensionContext, outputChannel: vscod
                 if (userInput) interactiveGenerateFlow(userInput, outputChannel);
             });
         }),
-        // 텍스트 에디터용 '섹션 채우기' 명령어
         vscode.commands.registerCommand('labnote.ai.populateSection', () => populateSectionFlow(context, outputChannel)),
         vscode.commands.registerCommand('labnote.ai.chat', () => {
             vscode.window.showInputBox({
@@ -108,7 +106,6 @@ function registerCommands(context: vscode.ExtensionContext, outputChannel: vscod
             });
         }),
 
-        // Manager Commands
         vscode.commands.registerCommand('labnote.manager.newWorkflow', () => newWorkflowCommand(customPaths.workflows)),
         vscode.commands.registerCommand('labnote.manager.newHwUnitOperation', createUnitOperationCommand(realFsProvider, customPaths.hwUnitOperations)),
         vscode.commands.registerCommand('labnote.manager.newSwUnitOperation', createUnitOperationCommand(realFsProvider, customPaths.swUnitOperations)),
@@ -118,7 +115,6 @@ function registerCommands(context: vscode.ExtensionContext, outputChannel: vscod
         vscode.commands.registerCommand('labnote.manager.reorderLabnotes', reorderLabnotesCommand)
     );
     
-    // 웹뷰(Visual Editor) 전용 '섹션 채우기' 명령어
     context.subscriptions.push(vscode.commands.registerCommand('labnote.ai.populateSection.webview', 
         (documentUri: vscode.Uri, uoId: string, section: string) => {
             populateSectionFromWebview(context, outputChannel, documentUri, uoId, section);
@@ -133,13 +129,11 @@ function registerEventListeners(context: vscode.ExtensionContext) {
             for (const file of e.files) {
                 const oldPath = file.oldUri.fsPath;
                 const newPath = file.newUri.fsPath;
-
                 if (logic.isValidWorkflowPath(oldPath) || logic.isValidWorkflowPath(newPath)) {
                     const oldBaseName = path.basename(oldPath);
                     const newBaseName = path.basename(newPath);
                     const oldMatch = oldBaseName.match(/^(\d{3})_/);
                     const newMatch = newBaseName.match(/^(\d{3})_/);
-
                     if (oldMatch && newMatch && oldMatch[1] !== newMatch[1]) {
                         const dir = path.dirname(newPath);
                         const readmePath = path.join(dir, 'README.md');
@@ -189,7 +183,6 @@ function registerChatParticipant(context: vscode.ExtensionContext, outputChannel
         }
         return { metadata: { command: request.command || "" } };
     };
-
     const participant = vscode.chat.createChatParticipant('labnote.participant', handler);
     participant.iconPath = vscode.Uri.file(path.join(context.extensionPath, 'images', 'icon.png'));
     participant.followupProvider = {
@@ -204,12 +197,8 @@ function registerChatParticipant(context: vscode.ExtensionContext, outputChannel
             }];
         }
     };
-
     context.subscriptions.push(participant);
 }
-
-
-// --- 명령어 구현 ---
 
 async function newWorkflowCommand(customWorkflowsPath: string) {
     try {
@@ -224,16 +213,13 @@ async function newWorkflowCommand(customWorkflowsPath: string) {
         if (!selectedWorkflow) return;
         const description = await vscode.window.showInputBox({ prompt: `Enter a specific description for "${selectedWorkflow.label}"` });
         if (description === undefined) return;
-        
         const result = logic.createNewWorkflow(realFsProvider, activeUri.fsPath, selectedWorkflow, description);
         const doc = await vscode.workspace.openTextDocument(activeUri);
         const insertPos = findInsertPosBeforeEndMarker(doc, ''); 
-        
         const we = new vscode.WorkspaceEdit();
         we.insert(activeUri, insertPos, result.textToInsert);
         await vscode.workspace.applyEdit(we);
         await doc.save();
-
         vscode.window.showInformationMessage(`워크플로 '${path.basename(result.workflowFilePath)}'가 생성되었습니다.`);
     } catch (error: any) {
         vscode.window.showErrorMessage(`[New Workflow] 오류: ${error.message}`);
@@ -247,26 +233,21 @@ function createUnitOperationCommand(fsProvider: FileSystemProvider, uoFilePath: 
             vscode.window.showErrorMessage("이 명령어는 'labnote' 실험 폴더 내의 워크플로 파일에서만 실행할 수 있습니다.");
             return;
         }
-
         try {
             const uoContent = fsProvider.readTextFile(uoFilePath);
             const uoItems = logic.parseUnitOperations(uoContent);
             const selectedUo = await vscode.window.showQuickPick(uoItems, { placeHolder: "Select a Unit Operation" });
             if (!selectedUo) return;
-
             const userDescription = await vscode.window.showInputBox({ prompt: `Enter a specific description for "${selectedUo.name}"` });
             if (userDescription === undefined) return;
-
             const workflowDir = path.dirname(activeUri.fsPath);
             const readmePath = path.join(workflowDir, 'README.md');
-
             let experimenter = '';
             if (fsProvider.exists(readmePath)) {
                 const readmeContent = fsProvider.readTextFile(readmePath);
                 const parsedFrontMatter = logic.parseReadmeFrontMatter(readmeContent);
                 experimenter = parsedFrontMatter?.author || '';
             }
-
             const textToInsert = logic.createUnitOperationContent(selectedUo, userDescription, new Date(), experimenter);
             const wfDoc = await vscode.workspace.openTextDocument(activeUri);
             const pos = findInsertPosBeforeEndMarker(wfDoc, '');
@@ -325,8 +306,6 @@ async function reorderLabnotesCommand() {
     await reorderLabnoteFolders(labnoteRoot);
 }
 
-// --- AI 기능 구현 ---
-
 async function interactiveGenerateFlow(userInput: string, outputChannel: vscode.OutputChannel) {
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
@@ -342,7 +321,6 @@ async function interactiveGenerateFlow(userInput: string, outputChannel: vscode.
             const rootPath = workspaceFolders[0].uri.fsPath;
             const labnoteRoot = path.join(rootPath, 'labnote');
             if (!fs.existsSync(labnoteRoot)) fs.mkdirSync(labnoteRoot);
-
             const entries = fs.readdirSync(labnoteRoot, { withFileTypes: true });
             const existingDirs = entries.filter(e => e.isDirectory() && /^\d{3}_/.test(e.name)).map(e => parseInt(e.name.substring(0, 3), 10));
             const nextId = existingDirs.length > 0 ? Math.max(...existingDirs) + 1 : 1;
@@ -350,45 +328,35 @@ async function interactiveGenerateFlow(userInput: string, outputChannel: vscode.
             const safeTitle = userInput.replace(/\s+/g, '_');
             const newDirName = `${formattedId}_${safeTitle}`;
             const newDirPath = path.join(labnoteRoot, newDirName);
-
             fs.mkdirSync(newDirPath, { recursive: true });
             fs.mkdirSync(path.join(newDirPath, 'images'), { recursive: true });
             fs.mkdirSync(path.join(newDirPath, 'resources'), { recursive: true });
             outputChannel.appendLine(`[Info] Created new experiment folder: ${newDirPath}`);
             progress.report({ increment: 10, message: "실험 구조 분석 중..." });
-
             const baseUrl = getBaseUrl();
             if (!baseUrl) return;
-
             const { ALL_WORKFLOWS, ALL_UOS } = await fetchConstants(baseUrl, outputChannel);
             const finalWorkflowId = await showWorkflowSelectionMenu(ALL_WORKFLOWS);
             if (!finalWorkflowId) return;
-
             const finalUoIds = await showUnifiedUoSelectionMenu(ALL_UOS, []);
             if (!finalUoIds || finalUoIds.length === 0) return;
-
             progress.report({ increment: 60, message: "연구노트 및 워크플로우 파일 생성 중..." });
-
             const createScaffoldResponse = await fetch(`${baseUrl}/create_scaffold`, {
                 method: 'POST',
                 headers: getApiHeaders(),
                 body: JSON.stringify({ query: userInput, workflow_id: finalWorkflowId, unit_operation_ids: finalUoIds, experimenter: "AI Assistant" }),
             });
             if (!createScaffoldResponse.ok) throw new Error(`뼈대 생성 실패 (HTTP ${createScaffoldResponse.status}): ${await createScaffoldResponse.text()}`);
-
             const scaffoldData = await createScaffoldResponse.json() as { files: Record<string, string> };
             progress.report({ increment: 90, message: "파일 저장 및 표시 중..." });
-
             for (const fileName in scaffoldData.files) {
                 const content = scaffoldData.files[fileName];
                 const filePath = path.join(newDirPath, fileName);
                 fs.writeFileSync(filePath, content);
                 outputChannel.appendLine(`[Success] Created file: ${filePath}`);
             }
-
             const readmePath = path.join(newDirPath, 'README.md');
             await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(readmePath), { preview: false });
-
             vscode.window.showInformationMessage(`연구노트 '${newDirName}' 및 관련 워크플로우 파일들이 생성되었습니다.`);
         } catch (error: any) {
             vscode.window.showErrorMessage('LabNote AI 작업 중 오류가 발생했습니다: ' + error.message);
@@ -397,13 +365,10 @@ async function interactiveGenerateFlow(userInput: string, outputChannel: vscode.
     });
 }
 
-// --- 섹션 채우기 로직 ---
-
-/** 텍스트 에디터용 진입점 */
 async function populateSectionFlow(extensionContext: vscode.ExtensionContext, outputChannel: vscode.OutputChannel) {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-        vscode.window.showWarningMessage("활성화된 텍스트 에디터가 없습니다. Visual Editor를 사용 중이라면 각 섹션의 'AI로 채우기' 버튼을 이용해주세요.");
+        vscode.window.showWarningMessage("활성화된 텍스트 에디터가 없습니다.");
         return;
     }
     try {
@@ -418,7 +383,6 @@ async function populateSectionFlow(extensionContext: vscode.ExtensionContext, ou
     }
 }
 
-/** 웹뷰용 진입점 */
 async function populateSectionFromWebview(
     extensionContext: vscode.ExtensionContext, 
     outputChannel: vscode.OutputChannel,
@@ -439,7 +403,6 @@ async function populateSectionFromWebview(
     }
 }
 
-/** 공통 처리 로직 */
 async function processAndApplyPopulation(
     extensionContext: vscode.ExtensionContext,
     outputChannel: vscode.OutputChannel,
@@ -472,16 +435,13 @@ async function processAndApplyPopulation(
         cancellable: true
     }, async (progress) => {
         progress.report({ increment: 20, message: "AI 에이전트 팀 호출 중..." });
-
         const baseUrl = getBaseUrl();
         if (!baseUrl) return;
-
         const populateResponse = await fetch(`${baseUrl}/populate_note`, {
             method: 'POST',
             headers: getApiHeaders(),
             body: JSON.stringify({ file_content: fileContent, uo_id: uoId, section, query })
         });
-
         if (!populateResponse.ok) {
             throw new Error(`AI 초안 생성 실패 (HTTP ${populateResponse.status}): ${await populateResponse.text()}`);
         }
@@ -490,13 +450,11 @@ async function processAndApplyPopulation(
             vscode.window.showInformationMessage("AI가 생성한 초안이 없습니다.");
             return;
         }
-
         const panel = createPopulateWebviewPanel(section, populateData.options);
         panel.webview.onDidReceiveMessage(
             async message => {
                 if (message.command === 'applyAndLearn') {
                     const { chosen_original, chosen_edited } = message;
-
                     if (isFromWebview) {
                         const md = require('markdown-it')();
                         const htmlContent = md.render(chosen_edited);
@@ -509,7 +467,6 @@ async function processAndApplyPopulation(
                             });
                         }
                     }
-                    
                     fetch(`${baseUrl}/record_preference`, {
                         method: 'POST',
                         headers: getApiHeaders(),
@@ -527,7 +484,6 @@ async function processAndApplyPopulation(
                     }).catch((err: any) => {
                         outputChannel.appendLine(`[WARN] DPO 데이터 기록 실패: ${err.message}`);
                     });
-
                     vscode.window.showInformationMessage(`'${section}' 섹션이 업데이트되었고, AI가 사용자의 수정을 학습합니다.`);
                     panel.dispose();
                 }
@@ -548,7 +504,6 @@ async function callChatApi(userInput: string, outputChannel: vscode.OutputChanne
             progress.report({ increment: 20, message: "AI에게 질문하는 중..." });
             const baseUrl = getBaseUrl();
             if (!baseUrl) return null;
-
             const response = await fetch(`${baseUrl}/chat`, {
                 method: 'POST',
                 headers: getApiHeaders(),
@@ -557,12 +512,10 @@ async function callChatApi(userInput: string, outputChannel: vscode.OutputChanne
                     conversation_id: conversationId
                 }),
             });
-
             if (!response.ok) {
                 throw new Error(`채팅 실패 (HTTP ${response.status}): ${await response.text()}`);
             }
             const chatData = await response.json() as ChatResponse;
-
             if (conversationId === null) {
                 const doc = await vscode.workspace.openTextDocument({
                     content: `# AI 답변: ${userInput}\n\n---\n\n${chatData.response}`,
@@ -570,7 +523,6 @@ async function callChatApi(userInput: string, outputChannel: vscode.OutputChanne
                 });
                 await vscode.window.showTextDocument(doc, { preview: false });
             }
-            
             return chatData;
         } catch (error: any) {
             vscode.window.showErrorMessage('LabNote AI와 대화 중 오류가 발생했습니다.');
@@ -580,13 +532,10 @@ async function callChatApi(userInput: string, outputChannel: vscode.OutputChanne
     });
 }
 
-// --- 유틸리티 및 헬퍼 함수 ---
-
 function resolveConfiguredPath(context: vscode.ExtensionContext, settingKey: string, defaultFileName: string): string {
     const config = vscode.workspace.getConfiguration('labnote.manager');
     let configured = (config.get<string>(settingKey) || '').trim();
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-
     if (configured) {
         if (workspaceRoot) {
             configured = configured.replace(/\$\{workspaceFolder\}/g, workspaceRoot);
@@ -619,22 +568,18 @@ async function reorderLabnoteFolders(labnoteRoot: string) {
                 .filter(e => e.isDirectory() && /^\d{3}_/.test(e.name))
                 .map(e => e.name)
                 .sort();
-
             if (labnoteDirs.length === 0) {
                 vscode.window.showInformationMessage("재정렬할 실험 폴더가 없습니다.");
                 return;
             }
             progress.report({ increment: 10, message: "폴더 목록 분석 중..." });
-
             const renames: { oldPath: string, newPath: string }[] = [];
             let needsReordering = false;
-
             for (let i = 0; i < labnoteDirs.length; i++) {
                 const newIndex = i + 1;
                 const newPrefix = String(newIndex).padStart(3, '0');
                 const oldDirName = labnoteDirs[i];
                 const oldPrefix = oldDirName.substring(0, 3);
-
                 if (oldPrefix !== newPrefix) {
                     needsReordering = true;
                     const restOfDirName = oldDirName.substring(4);
@@ -645,25 +590,21 @@ async function reorderLabnoteFolders(labnoteRoot: string) {
                     });
                 }
             }
-
             if (!needsReordering) {
                 vscode.window.showInformationMessage("실험 폴더 번호가 이미 순서대로 정렬되어 있습니다.");
                 return;
             }
             progress.report({ increment: 30, message: "이름 변경 계획 수립 중..." });
-
             const edit = new vscode.WorkspaceEdit();
             for (const r of renames) {
                 edit.renameFile(vscode.Uri.file(r.oldPath), vscode.Uri.file(r.newPath + '.tmp'), { overwrite: true });
             }
             await vscode.workspace.applyEdit(edit);
-
             const finalEdit = new vscode.WorkspaceEdit();
             for (const r of renames) {
                 finalEdit.renameFile(vscode.Uri.file(r.newPath + '.tmp'), vscode.Uri.file(r.newPath), { overwrite: true });
             }
             await vscode.workspace.applyEdit(finalEdit);
-
             progress.report({ increment: 100 });
             vscode.window.showInformationMessage("실험 폴더 번호 재정렬이 완료되었습니다.");
         } catch (error: any) {
@@ -685,22 +626,18 @@ async function reorderWorkflowFiles(readmePath: string) {
                 .filter(e => !e.isDirectory() && /^\d{3}_.+\.md$/.test(e.name))
                 .map(e => e.name)
                 .sort();
-
             if (workflowFiles.length === 0) {
                 vscode.window.showInformationMessage("재정렬할 워크플로우 파일이 없습니다.");
                 return;
             }
             progress.report({ increment: 10, message: "파일 목록 분석 중..." });
-
             const renameQueue: { oldPath: string, newPath: string }[] = [];
             let needsReordering = false;
-
             for (let i = 0; i < workflowFiles.length; i++) {
                 const newIndex = i + 1;
                 const newPrefix = String(newIndex).padStart(3, '0');
                 const oldFileName = workflowFiles[i];
                 const oldPrefix = oldFileName.substring(0, 3);
-
                 if (oldPrefix !== newPrefix) {
                     needsReordering = true;
                     const restOfFileName = oldFileName.substring(4);
@@ -711,47 +648,38 @@ async function reorderWorkflowFiles(readmePath: string) {
                     });
                 }
             }
-
             if (!needsReordering) {
                 vscode.window.showInformationMessage("워크플로우 번호가 이미 순서대로 정렬되어 있습니다.");
                 return;
             }
             progress.report({ increment: 30, message: "이름 변경 계획 수립 중..." });
-
             const tempEdit = new vscode.WorkspaceEdit();
             for (const item of renameQueue) {
                 tempEdit.renameFile(vscode.Uri.file(item.oldPath), vscode.Uri.file(item.newPath + ".tmp"), { overwrite: true });
             }
             await vscode.workspace.applyEdit(tempEdit);
-            
             const finalEdit = new vscode.WorkspaceEdit();
             for (const item of renameQueue) {
                 finalEdit.renameFile(vscode.Uri.file(item.newPath + ".tmp"), vscode.Uri.file(item.newPath), { overwrite: true });
             }
             await vscode.workspace.applyEdit(finalEdit);
-
             progress.report({ increment: 70, message: "README.md 링크 업데이트 중..." });
-
             const readmeUri = vscode.Uri.file(readmePath);
             const readmeDoc = await vscode.workspace.openTextDocument(readmeUri);
             let readmeContent = readmeDoc.getText();
-            
             for (const item of renameQueue) {
                 const oldBase = path.basename(item.oldPath);
                 const newBase = path.basename(item.newPath);
                 const oldPrefix = oldBase.substring(0, 3);
                 const newPrefix = newBase.substring(0, 3);
-
                 const regex = new RegExp(`(\\[ \\] \\[)${oldPrefix}(.*?\\].*?\\s*\\()\\.\\/${oldBase}(\\))`, "g");
                 readmeContent = readmeContent.replace(regex, `$1${newPrefix}$2./${newBase}$3`);
             }
-            
             const fullRange = new vscode.Range(readmeDoc.positionAt(0), readmeDoc.positionAt(readmeDoc.getText().length));
             const readmeEdit = new vscode.WorkspaceEdit();
             readmeEdit.replace(readmeUri, fullRange, readmeContent);
             await vscode.workspace.applyEdit(readmeEdit);
             await readmeDoc.save();
-
             progress.report({ increment: 100 });
             vscode.window.showInformationMessage("워크플로우 번호 재정렬이 완료되었습니다.");
         } catch (error: any) {
@@ -801,14 +729,13 @@ function createPopulateWebviewPanel(section: string, options: string[]): vscode.
 }
 
 function getPopulateWebviewContent(section: string, options: string[]): string {
-    const optionCards = options.map((option, index) => {
+    const optionCards = options.map((option) => {
         const escapedOption = option.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const encodedOption = Buffer.from(option).toString('base64');
-        return `<div class="option-card" data-index="${index}" data-original-content="${encodedOption}">
+        return `<div class="option-card" data-original-content="${encodedOption}">
                     <pre><code>${escapedOption}</code></pre>
                 </div>`;
     }).join('');
-
     return `<!DOCTYPE html>
     <html lang="en">
     <head>
@@ -831,24 +758,19 @@ function getPopulateWebviewContent(section: string, options: string[]): string {
     <body>
         <h1>"${section}" 섹션에 대한 AI 제안</h1>
         <p>1. 아래 제안 중 하나를 선택한 후, 2. 필요시 내용을 수정하고, 3. '적용 및 AI 학습' 버튼을 누르세요.</p>
-        
         <div id="options-container">${optionCards}</div>
-
         <div id="editor-section">
             <h2>수정 창</h2>
             <textarea id="editor-textarea"></textarea>
             <button id="apply-btn">적용 및 AI 학습</button>
         </div>
-
         <script>
             const vscode = acquireVsCodeApi();
             const cards = document.querySelectorAll('.option-card');
             const editorSection = document.getElementById('editor-section');
             const editorTextarea = document.getElementById('editor-textarea');
             const applyBtn = document.getElementById('apply-btn');
-            
             let selectedOriginalContent = '';
-
             cards.forEach(card => {
                 card.addEventListener('click', () => {
                     cards.forEach(c => c.classList.remove('selected'));
@@ -858,7 +780,6 @@ function getPopulateWebviewContent(section: string, options: string[]): string {
                     editorSection.style.display = 'block';
                 });
             });
-
             applyBtn.addEventListener('click', () => {
                 const editedContent = editorTextarea.value;
                 if (selectedOriginalContent) {
@@ -876,85 +797,78 @@ function getPopulateWebviewContent(section: string, options: string[]): string {
 
 /**
  * ⭐️ [최종 수정 함수]
- * 이 함수가 모든 문제의 원인이었습니다. 아래 코드로 완전히 교체해주세요.
+ * 모든 문제를 해결하기 위해 로직을 완전히 새로 작성했습니다.
  */
 function findSectionContext(document: vscode.TextDocument, positionOrContext: vscode.Position | { uoId: string, section: string }): SectionContext | null {
     const fileContent = document.getText();
     const yamlMatch = fileContent.match(/^---\s*[\r\n]+title:\s*["']?(.*?)["']?[\r\n]+/);
     const query = yamlMatch ? yamlMatch[1].replace(/\[AI Generated\]\s*/, '').trim() : "Untitled Experiment";
 
-    let uoId = "";
-    let section = "";
-    let placeholderRange: vscode.Range | null = null;
-    let uoLineNum = -1;
+    let uoId: string | undefined;
+    let section: string | undefined;
 
+    // 1. uoId와 section 정보 확립
     if (positionOrContext instanceof vscode.Position) {
-        let sectionLineNum = -1;
-        // 1. 현재 커서 위치에서 위로 올라가며 가장 가까운 '####' 섹션 제목 찾기
+        // [텍스트 에디터] 커서 위치에서 위로 탐색
+        let currentSection: string | undefined;
         for (let i = positionOrContext.line; i >= 0; i--) {
             const lineText = document.lineAt(i).text;
-            const sectionMatch = lineText.match(/^####\s*([A-Za-z\s&]+)/);
-            if (sectionMatch) {
-                section = sectionMatch[1].trim();
-                sectionLineNum = i;
-                break;
+            if (!currentSection) {
+                const sectionMatch = lineText.match(/^####\s*([A-Za-z\s&]+)/);
+                if (sectionMatch) {
+                    currentSection = sectionMatch[1].trim();
+                }
             }
-        }
-        if (!section) return null;
-
-        // 2. 찾은 섹션에서 다시 위로 올라가며 가장 가까운 '### [U...]' Unit Operation ID 찾기
-        for (let i = sectionLineNum - 1; i >= 0; i--) {
-            const lineText = document.lineAt(i).text;
-            const uoMatch = lineText.match(/^###\s*\[(U[A-Z]{1,3}\d{3,4})\]/);
+            const uoMatch = lineText.match(/^###\s*\[(U[A-Z]{2,3}\d{3,4})\]/);
             if (uoMatch) {
                 uoId = uoMatch[1];
-                uoLineNum = i;
+                section = currentSection;
                 break;
             }
         }
-    } else { // 웹뷰에서 호출된 경우
+    } else {
+        // [웹뷰]
         uoId = positionOrContext.uoId;
         section = positionOrContext.section;
-        const uoRegex = new RegExp(`^###\\s*\\[${uoId}\\]`);
-        for (let i = 0; i < document.lineCount; i++) {
-            if (uoRegex.test(document.lineAt(i).text)) {
-                uoLineNum = i;
-                break;
-            }
-        }
     }
 
-    if (!uoId || uoLineNum === -1) return null;
+    if (!uoId || !section) return null;
 
-    // 3. 찾은 섹션 아래에서 플레이스홀더 '(...' 텍스트 찾기
-    const placeholderRegex = /^\s*(-\s*)?\(.*\)\s*$/;
-    let sectionFound = false;
+    // 2. 확립된 정보를 바탕으로 문서 전체에서 정확한 위치와 플레이스홀더 찾기
+    const uoRegex = new RegExp(`^###\\s*\\[${uoId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]`);
     const sectionRegex = new RegExp(`^####\\s*${section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
+    
+    let uoLineNum = -1;
+    let sectionLineNum = -1;
 
-    for (let i = uoLineNum + 1; i < document.lineCount; i++) {
-        const line = document.lineAt(i);
-        // 다른 Unit Operation을 만나면 검색 중단
-        if (i > uoLineNum && line.text.startsWith('###')) break;
-        
-        // 현재 섹션 제목을 찾으면 플래그 설정
-        if (!sectionFound && sectionRegex.test(line.text)) {
-            sectionFound = true;
-            continue;
+    for (let i = 0; i < document.lineCount; i++) {
+        const lineText = document.lineAt(i).text;
+        if (uoRegex.test(lineText)) {
+            uoLineNum = i;
         }
-
-        // 다른 섹션을 만나면 검색 중단
-        if (sectionFound && line.text.startsWith('####')) break;
-
-        // 섹션을 찾은 후, 플레이스홀더를 찾으면 해당 라인의 범위를 저장하고 종료
-        if (sectionFound && placeholderRegex.test(line.text)) {
-            placeholderRange = line.range;
-            break;
+        if (uoLineNum !== -1 && sectionRegex.test(lineText)) {
+            sectionLineNum = i;
+            break; 
+        }
+        if (uoLineNum !== -1 && i > uoLineNum && lineText.startsWith("###")) {
+            return null; // 다른 UO를 찾았는데 아직 섹션을 못찾았으면 실패
+        }
+    }
+    
+    if (sectionLineNum === -1) return null;
+    
+    // 3. 찾은 섹션 아래에서 플레이스홀더 찾기
+    for (let i = sectionLineNum + 1; i < document.lineCount; i++) {
+        const line = document.lineAt(i);
+        if (line.text.startsWith('#')) break;
+        
+        const placeholderRegex = /^\s*(-\s*)?\(.*\)\s*$/;
+        if (placeholderRegex.test(line.text)) {
+            return { uoId, section, query, fileContent, placeholderRange: line.range };
         }
     }
 
-    if (!placeholderRange) return null;
-
-    return { uoId, section, query, fileContent, placeholderRange };
+    return null;
 }
 
 async function fetchConstants(baseUrl: string, outputChannel: vscode.OutputChannel): Promise<{ ALL_WORKFLOWS: { [id: string]: string }, ALL_UOS: { [id: string]: string } }> {
