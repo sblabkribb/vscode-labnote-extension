@@ -2,7 +2,7 @@
   "name": "labnote-ai-assistant",
   "displayName": "LabNote AI Assistant",
   "description": "An AI assistant to help with writing lab notes in VS Code.",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "publisher": "BiofoundryLabs",
   "engines": {
     "vscode": "^1.85.0"
@@ -20,7 +20,8 @@
     "onCommand:labnote.ai.chat",
     "onCommand:labnote.manager.insertTable",
     "onCommand:labnote.manager.reorderWorkflows",
-    "onCommand:labnote.manager.reorderLabnotes"
+    "onCommand:labnote.manager.reorderLabnotes",
+    "onCustomEditor:labnote.visualEditor"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -71,6 +72,32 @@
       {
         "command": "labnote.manager.reorderLabnotes",
         "title": "LabNote: 실험 폴더 번호 재정렬"
+      },
+      {
+        "command": "labnote.openVisualEditor",
+        "title": "Open in Visual Labnote Editor",
+        "icon": "$(edit)"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "when": "resourceExtname == .md",
+          "command": "labnote.openVisualEditor",
+          "group": "navigation"
+        }
+      ]
+    },
+    "customEditors": [
+      {
+        "viewType": "labnote.visualEditor",
+        "displayName": "Visual Labnote Editor",
+        "selector": [
+          {
+            "filenamePattern": "*.md"
+          }
+        ],
+        "priority": "option"
       }
     ],
     "configuration": {
@@ -120,6 +147,7 @@
     "lint": "eslint src --ext ts"
   },
   "devDependencies": {
+    "@types/glob": "8.1.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "18.x",
     "@types/node-fetch": "^2.6.11",
