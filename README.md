@@ -37,7 +37,7 @@ LabNote AI Assistant는 VS Code 확장 프로그램 API를 기반으로, AI 백�
 ```mermaid
 graph TD
     subgraph VS Code
-        A[VS Code UI / Editor] --> B[Extension Host];
+        A["VS Code UI / Editor"] --> B["Extension Host"];
         B --> A;
     end
 
@@ -62,7 +62,7 @@ graph TD
     E -- HTTP Request --> J;
     G -- HTTP Request --> J;
 
-    style A fill:#2c2c2c,stroke:#fff,stroke-width:2px
+    style A fill:#2c2c2c,stroke:#fff,stroke-width:2px,color:#fff
     style B fill:#2c2c2c,stroke:#fff,stroke-width:2px,color:#fff
     style J fill:#4caf50,stroke:#fff,stroke-width:2px,color:#fff
 ````
@@ -188,5 +188,4 @@ sequenceDiagram
   * **사용자 생성 콘텐츠**: 사용자가 이 확장 프로그램을 통해 작성하고 수정한 모든 연구노트의 저작권은 **사용자**에게 있습니다.
   * **AI 생성 콘텐츠**: AI가 생성한 초안은 사용자의 작업을 돕기 위한 보조 자료이며, 최종 콘텐츠에 대한 책임과 권리는 이를 채택하고 수정한 사용자에게 귀속됩니다.
 
------
 
