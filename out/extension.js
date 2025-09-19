@@ -71,15 +71,10 @@ function getBaseUrl() {
 function activate(context) {
     const outputChannel = vscode.window.createOutputChannel("LabNote AI");
     outputChannel.appendLine("LabNote AI/Manager extension is now active.");
-    // 1. 커스텀 에디터 등록
     context.subscriptions.push(LabnoteEditorProvider_1.LabnoteEditorProvider.register(context));
-    // 2. 리소스 초기화
     initializeResources(context);
-    // 3. 명령어 등록
     registerCommands(context, outputChannel);
-    // 4. 이벤트 리스너 등록
     registerEventListeners(context);
-    // 5. Copilot Chat Participant 등록
     registerChatParticipant(context, outputChannel);
 }
 function deactivate() { }
@@ -96,9 +91,7 @@ function registerCommands(context, outputChannel) {
         hwUnitOperations: resolveConfiguredPath(context, 'hwUnitOperationsPath', 'unitoperations_hw_en.md'),
         swUnitOperations: resolveConfiguredPath(context, 'swUnitOperationsPath', 'unitoperations_sw_en.md'),
     };
-    context.subscriptions.push(
-    // ⭐️ Visual Editor Command (수정된 부분)
-    vscode.commands.registerCommand('labnote.openVisualEditor', (uri) => {
+    context.subscriptions.push(vscode.commands.registerCommand('labnote.openVisualEditor', (uri) => {
         vscode.commands.executeCommand('vscode.openWith', uri, LabnoteEditorProvider_1.LabnoteEditorProvider.viewType);
     }), 
     // AI Commands
@@ -110,7 +103,9 @@ function registerCommands(context, outputChannel) {
             if (userInput)
                 interactiveGenerateFlow(userInput, outputChannel);
         });
-    }), vscode.commands.registerCommand('labnote.ai.populateSection', () => populateSectionFlow(context, outputChannel)), vscode.commands.registerCommand('labnote.ai.chat', () => {
+    }), 
+    // 텍스트 에디터용 '섹션 채우기' 명령어
+    vscode.commands.registerCommand('labnote.ai.populateSection', () => populateSectionFlow(context, outputChannel)), vscode.commands.registerCommand('labnote.ai.chat', () => {
         vscode.window.showInputBox({
             prompt: 'AI에게 질문할 내용을 입력하세요.',
             placeHolder: '예: CRISPR-Cas9 시스템에 대해 설명해줘'
@@ -121,6 +116,10 @@ function registerCommands(context, outputChannel) {
     }), 
     // Manager Commands
     vscode.commands.registerCommand('labnote.manager.newWorkflow', () => newWorkflowCommand(customPaths.workflows)), vscode.commands.registerCommand('labnote.manager.newHwUnitOperation', createUnitOperationCommand(realFsProvider, customPaths.hwUnitOperations)), vscode.commands.registerCommand('labnote.manager.newSwUnitOperation', createUnitOperationCommand(realFsProvider, customPaths.swUnitOperations)), vscode.commands.registerCommand('labnote.manager.manageTemplates', () => manageTemplatesCommand(customPaths)), vscode.commands.registerCommand('labnote.manager.insertTable', insertTableCommand), vscode.commands.registerCommand('labnote.manager.reorderWorkflows', reorderWorkflowsCommand), vscode.commands.registerCommand('labnote.manager.reorderLabnotes', reorderLabnotesCommand));
+    // 웹뷰(Visual Editor) 전용 '섹션 채우기' 명령어
+    context.subscriptions.push(vscode.commands.registerCommand('labnote.ai.populateSection.webview', (documentUri, uoId, section) => {
+        populateSectionFromWebview(context, outputChannel, documentUri, uoId, section);
+    }));
 }
 function registerEventListeners(context) {
     context.subscriptions.push(vscode.workspace.onDidRenameFiles(async (e) => {
@@ -366,7 +365,44 @@ async function interactiveGenerateFlow(userInput, outputChannel) {
         }
     });
 }
+// --- 섹션 채우기 로직 (findSectionContext 함수만 수정됨) ---
+/** 텍스트 에디터용 진입점 */
 async function populateSectionFlow(extensionContext, outputChannel) {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+        vscode.window.showWarningMessage("활성화된 텍스트 에디터가 없습니다. Visual Editor를 사용 중이라면 각 섹션의 'AI로 채우기' 버튼을 이용해주세요.");
+        return;
+    }
+    try {
+        const sectionContext = findSectionContext(editor.document, editor.selection.active);
+        if (!sectionContext) {
+            vscode.window.showErrorMessage("현재 커서 위치에서 채울 수 있는 Unit Operation 섹션(과 플레이스홀더)을 찾을 수 없습니다.");
+            return;
+        }
+        await processAndApplyPopulation(extensionContext, outputChannel, editor.document.uri, sectionContext, false);
+    }
+    catch (error) {
+        vscode.window.showErrorMessage(`LabNote AI 작업 중 오류 발생: ${error.message}`);
+    }
+}
+/** 웹뷰용 진입점 */
+async function populateSectionFromWebview(extensionContext, outputChannel, documentUri, uoId, section) {
+    try {
+        const document = await vscode.workspace.openTextDocument(documentUri);
+        const sectionContext = findSectionContext(document, { uoId, section });
+        if (!sectionContext) {
+            vscode.window.showErrorMessage(`'${section}' 섹션을 찾을 수 없습니다. (UO: ${uoId})`);
+            return;
+        }
+        await processAndApplyPopulation(extensionContext, outputChannel, documentUri, sectionContext, true);
+    }
+    catch (error) {
+        vscode.window.showErrorMessage(`LabNote AI 작업 중 오류 발생: ${error.message}`);
+    }
+}
+/** 공통 처리 로직 */
+async function processAndApplyPopulation(extensionContext, outputChannel, documentUri, sectionContext, isFromWebview) {
+    // 동의 확인 로직
     const consent = extensionContext.globalState.get('labnoteAiConsent');
     if (consent !== 'given') {
         const selection = await vscode.window.showInformationMessage('LabNote AI 성능 향상을 위해, 사용자가 선택하고 수정한 내용을 익명화하여 모델 학습에 사용합니다. 이에 동의하십니까? 자세한 내용은 프로젝트 README의 "데이터 활용 및 저작권 정책"을 참고해주세요.', { modal: true }, '동의', '거부');
@@ -379,77 +415,70 @@ async function populateSectionFlow(extensionContext, outputChannel) {
             return;
         }
     }
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) {
-        vscode.window.showWarningMessage("활성화된 에디터가 없습니다.");
-        return;
-    }
-    try {
-        const sectionContext = findSectionContext(editor.document, editor.selection.active);
-        if (!sectionContext) {
-            vscode.window.showErrorMessage("현재 커서가 위치한 곳에서 채울 수 있는 Unit Operation 섹션(과 플레이스홀더)을 찾을 수 없습니다.");
+    const { uoId, section, query, fileContent, placeholderRange } = sectionContext;
+    const currentFilePath = documentUri.fsPath;
+    outputChannel.appendLine(`[Action] Populate section request for UO '${uoId}', Section '${section}'`);
+    await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: `LabNote AI: '${section}' 섹션 생성 중...`,
+        cancellable: true
+    }, async (progress) => {
+        progress.report({ increment: 20, message: "AI 에이전트 팀 호출 중..." });
+        const baseUrl = getBaseUrl();
+        if (!baseUrl)
+            return;
+        const populateResponse = await fetch(`${baseUrl}/populate_note`, {
+            method: 'POST',
+            headers: getApiHeaders(),
+            body: JSON.stringify({ file_content: fileContent, uo_id: uoId, section, query })
+        });
+        if (!populateResponse.ok) {
+            throw new Error(`AI 초안 생성 실패 (HTTP ${populateResponse.status}): ${await populateResponse.text()}`);
+        }
+        const populateData = await populateResponse.json();
+        if (!populateData.options || populateData.options.length === 0) {
+            vscode.window.showInformationMessage("AI가 생성한 초안이 없습니다.");
             return;
         }
-        const { uoId, section, query, fileContent, placeholderRange } = sectionContext;
-        const currentFilePath = editor.document.uri.fsPath;
-        outputChannel.appendLine(`[Action] Populate section request for UO '${uoId}', Section '${section}'`);
-        await vscode.window.withProgress({
-            location: vscode.ProgressLocation.Notification,
-            title: `LabNote AI: '${section}' 섹션 생성 중...`,
-            cancellable: true
-        }, async (progress) => {
-            progress.report({ increment: 20, message: "AI 에이전트 팀 호출 중..." });
-            const baseUrl = getBaseUrl();
-            if (!baseUrl)
-                return;
-            const populateResponse = await fetch(`${baseUrl}/populate_note`, {
-                method: 'POST',
-                headers: getApiHeaders(),
-                body: JSON.stringify({ file_content: fileContent, uo_id: uoId, section, query })
-            });
-            if (!populateResponse.ok) {
-                throw new Error(`AI 초안 생성 실패 (HTTP ${populateResponse.status}): ${await populateResponse.text()}`);
-            }
-            const populateData = await populateResponse.json();
-            if (!populateData.options || populateData.options.length === 0) {
-                vscode.window.showInformationMessage("AI가 생성한 초안이 없습니다.");
-                return;
-            }
-            const panel = createPopulateWebviewPanel(section, populateData.options);
-            panel.webview.onDidReceiveMessage(async (message) => {
-                if (message.command === 'applyAndLearn') {
-                    const { chosen_original, chosen_edited } = message;
-                    const rejectedOptions = populateData.options.filter(opt => opt !== chosen_original);
-                    await editor.edit(editBuilder => {
-                        editBuilder.replace(placeholderRange, chosen_edited);
-                    });
-                    fetch(`${baseUrl}/record_preference`, {
-                        method: 'POST',
-                        headers: getApiHeaders(),
-                        body: JSON.stringify({
-                            uo_id: uoId,
-                            section,
-                            chosen_original,
-                            chosen_edited,
-                            rejected: rejectedOptions,
-                            query,
-                            file_content: editor.document.getText(),
-                            file_path: currentFilePath,
-                            supervisor_evaluations: populateData.supervisor_evaluations || []
-                        })
-                    }).catch((err) => {
-                        outputChannel.appendLine(`[WARN] DPO 데이터 기록 실패: ${err.message}`);
-                    });
-                    vscode.window.showInformationMessage(`'${section}' 섹션이 업데이트되었고, AI가 사용자의 수정을 학습합니다.`);
-                    panel.dispose();
+        const panel = createPopulateWebviewPanel(section, populateData.options);
+        panel.webview.onDidReceiveMessage(async (message) => {
+            if (message.command === 'applyAndLearn') {
+                const { chosen_original, chosen_edited } = message;
+                if (isFromWebview) {
+                    const md = require('markdown-it')();
+                    const htmlContent = md.render(chosen_edited);
+                    LabnoteEditorProvider_1.LabnoteEditorProvider.updateWebviewSection(documentUri, uoId, section, htmlContent);
                 }
-            }, undefined, extensionContext.subscriptions);
-        });
-    }
-    catch (error) {
-        vscode.window.showErrorMessage(`LabNote AI 작업 중 오류 발생: ${error.message}`);
-        outputChannel.appendLine(`[ERROR] ${error.message}`);
-    }
+                else {
+                    const editor = vscode.window.activeTextEditor;
+                    if (editor && editor.document.uri.toString() === documentUri.toString()) {
+                        await editor.edit(editBuilder => {
+                            editBuilder.replace(placeholderRange, chosen_edited);
+                        });
+                    }
+                }
+                fetch(`${baseUrl}/record_preference`, {
+                    method: 'POST',
+                    headers: getApiHeaders(),
+                    body: JSON.stringify({
+                        uo_id: uoId,
+                        section,
+                        chosen_original,
+                        chosen_edited,
+                        rejected: populateData.options.filter(opt => opt !== chosen_original),
+                        query,
+                        file_content: (await vscode.workspace.openTextDocument(documentUri)).getText(),
+                        file_path: currentFilePath,
+                        supervisor_evaluations: populateData.supervisor_evaluations || []
+                    })
+                }).catch((err) => {
+                    outputChannel.appendLine(`[WARN] DPO 데이터 기록 실패: ${err.message}`);
+                });
+                vscode.window.showInformationMessage(`'${section}' 섹션이 업데이트되었고, AI가 사용자의 수정을 학습합니다.`);
+                panel.dispose();
+            }
+        }, undefined, extensionContext.subscriptions);
+    });
 }
 async function callChatApi(userInput, outputChannel, conversationId) {
     return vscode.window.withProgress({
@@ -512,6 +541,7 @@ function resolveConfiguredPath(context, settingKey, defaultFileName) {
     return path.join(context.extensionPath, 'out', 'resources', defaultFileName);
 }
 async function reorderLabnoteFolders(labnoteRoot) {
+    // ... (이 함수의 내용은 변경되지 않았으므로 생략하지 않고 모두 포함)
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
         title: "실험 폴더 번호 재정렬 중...",
@@ -573,6 +603,7 @@ async function reorderLabnoteFolders(labnoteRoot) {
     });
 }
 async function reorderWorkflowFiles(readmePath) {
+    // ... (이 함수의 내용은 변경되지 않았으므로 생략하지 않고 모두 포함)
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
         title: "워크플로우 번호 재정렬 중...",
@@ -679,10 +710,10 @@ function createPopulateWebviewPanel(section, options) {
         enableScripts: true,
         retainContextWhenHidden: true
     });
-    panel.webview.html = getWebviewContent(section, options);
+    panel.webview.html = getPopulateWebviewContent(section, options);
     return panel;
 }
-function getWebviewContent(section, options) {
+function getPopulateWebviewContent(section, options) {
     const optionCards = options.map((option, index) => {
         const escapedOption = option.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const encodedOption = Buffer.from(option).toString('base64');
@@ -754,49 +785,75 @@ function getWebviewContent(section, options) {
     </body>
     </html>`;
 }
-function findSectionContext(document, position) {
-    let currentSection = "";
-    let currentUoId = "";
-    let sectionLineNum = -1;
-    for (let i = position.line; i >= 0; i--) {
-        const lineText = document.lineAt(i).text;
-        const sectionMatch = lineText.match(/^####\s*([A-Za-z\s&]+)/);
-        if (sectionMatch) {
-            currentSection = sectionMatch[1].trim();
-            sectionLineNum = i;
-            break;
+/**
+ * [가장 중요한 수정 함수]
+ * 커서 위치 또는 (UO ID + 섹션 이름) 객체를 받아 해당 섹션의 컨텍스트를 찾습니다.
+ */
+function findSectionContext(document, positionOrContext) {
+    const fileContent = document.getText();
+    const yamlMatch = fileContent.match(/^---\s*[\r\n]+title:\s*["']?(.*?)["']?[\r\n]+/);
+    const query = yamlMatch ? yamlMatch[1].replace(/\[AI Generated\]\s*/, '').trim() : "Untitled Experiment";
+    let uoId = "";
+    let section = "";
+    let placeholderRange = null;
+    let uoLineNum = -1;
+    if (positionOrContext instanceof vscode.Position) {
+        let sectionLineNum = -1;
+        for (let i = positionOrContext.line; i >= 0; i--) {
+            const lineText = document.lineAt(i).text;
+            const sectionMatch = lineText.match(/^####\s*([A-Za-z\s&]+)/);
+            if (sectionMatch) {
+                section = sectionMatch[1].trim();
+                sectionLineNum = i;
+                break;
+            }
+        }
+        if (!section)
+            return null;
+        for (let i = sectionLineNum - 1; i >= 0; i--) {
+            const lineText = document.lineAt(i).text;
+            // ⭐️ [수정된 부분 1] UO ID 뒤에 설명이 있어도 ID를 정확히 찾도록 정규식 수정
+            const uoMatch = lineText.match(/^###\s*\[(U[A-Z]{1,3}\d{3,4})/);
+            if (uoMatch) {
+                uoId = uoMatch[1];
+                uoLineNum = i;
+                break;
+            }
         }
     }
-    if (!currentSection)
-        return null;
-    for (let i = sectionLineNum - 1; i >= 0; i--) {
-        const lineText = document.lineAt(i).text;
-        const uoMatch = lineText.match(/^###\s*\[(U[A-Z]{1,2}\d{3,4})/);
-        if (uoMatch) {
-            currentUoId = uoMatch[1];
-            break;
+    else {
+        uoId = positionOrContext.uoId;
+        section = positionOrContext.section;
+        // ⭐️ [수정된 부분 2] 웹뷰에서 넘어온 ID로 헤더를 찾을 때도 설명이 있는 경우를 허용하도록 정규식 수정
+        const uoRegex = new RegExp(`^###\\s*\\[${uoId}`);
+        for (let i = 0; i < document.lineCount; i++) {
+            if (uoRegex.test(document.lineAt(i).text)) {
+                uoLineNum = i;
+                break;
+            }
         }
     }
-    if (!currentUoId)
+    if (!uoId || uoLineNum === -1)
         return null;
     const placeholderRegex = /^\s*(-\s*)?\(.*\)\s*$/;
-    let placeholderRange = null;
-    for (let i = sectionLineNum + 1; i < document.lineCount; i++) {
+    let sectionFound = false;
+    const sectionRegex = new RegExp(`^####\\s*${section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
+    for (let i = uoLineNum + 1; i < document.lineCount; i++) {
         const line = document.lineAt(i);
-        if (line.text.startsWith('###') || line.text.startsWith('####')) {
+        if (i > uoLineNum && line.text.startsWith('###'))
             break;
+        if (!sectionFound && sectionRegex.test(line.text)) {
+            sectionFound = true;
+            continue;
         }
-        if (placeholderRegex.test(line.text)) {
+        if (sectionFound && placeholderRegex.test(line.text)) {
             placeholderRange = line.range;
             break;
         }
     }
     if (!placeholderRange)
         return null;
-    const text = document.getText();
-    const yamlMatch = text.match(/^---\s*[\r\n]+title:\s*["']?(.*?)["']?[\r\n]+/);
-    const query = yamlMatch ? yamlMatch[1].replace(/\[AI Generated\]\s*/, '').trim() : "Untitled Experiment";
-    return { uoId: currentUoId, section: currentSection, query, fileContent: text, placeholderRange };
+    return { uoId, section, query, fileContent, placeholderRange };
 }
 async function fetchConstants(baseUrl, outputChannel) {
     try {

@@ -41,10 +41,22 @@ class LabnoteEditorProvider {
         const providerRegistration = vscode.window.registerCustomEditorProvider(LabnoteEditorProvider.viewType, provider);
         return providerRegistration;
     }
+    static updateWebviewSection(documentUri, uoId, section, newContent) {
+        const panel = LabnoteEditorProvider.panels.get(documentUri.toString());
+        if (panel) {
+            panel.webview.postMessage({
+                type: 'updateSection',
+                uoId: uoId,
+                section: section,
+                htmlContent: newContent
+            });
+        }
+    }
     constructor(context) {
         this.context = context;
     }
     async resolveCustomTextEditor(document, webviewPanel, _token) {
+        LabnoteEditorProvider.panels.set(document.uri.toString(), webviewPanel);
         webviewPanel.webview.options = {
             enableScripts: true,
         };
@@ -57,18 +69,13 @@ class LabnoteEditorProvider {
         };
         const changeDocumentSubscription = vscode.workspace.onDidChangeTextDocument(e => {
             if (e.document.uri.toString() === document.uri.toString() && e.contentChanges.length > 0) {
-                // Avoid updating the webview if the change came from the webview itself
-                // This check is basic and might need more robust logic for complex scenarios
-                const sourceOfChange = e.reason;
-                if (sourceOfChange !== vscode.TextDocumentChangeReason.Undo && sourceOfChange !== vscode.TextDocumentChangeReason.Redo) {
-                    // A simple heuristic: if the change is not a simple undo/redo, it might be from an external source.
-                    // For a truly robust solution, one would need a more complex state management.
-                    // console.log('Document changed externally, updating webview.');
-                    // updateWebview();
+                if (e.reason !== vscode.TextDocumentChangeReason.Undo && e.reason !== vscode.TextDocumentChangeReason.Redo) {
+                    updateWebview();
                 }
             }
         });
         webviewPanel.onDidDispose(() => {
+            LabnoteEditorProvider.panels.delete(document.uri.toString());
             changeDocumentSubscription.dispose();
         });
         webviewPanel.webview.onDidReceiveMessage(e => {
@@ -76,9 +83,11 @@ class LabnoteEditorProvider {
                 case 'save':
                     this.updateTextDocument(document, e.text);
                     return;
-                case 'edit':
-                    // This is for live edits, if we want to implement auto-save or dirty status
-                    // For now, we only care about the explicit save action
+                case 'populate':
+                    vscode.commands.executeCommand('labnote.ai.populateSection.webview', document.uri, e.uoId, e.section);
+                    return;
+                case 'updateTextDocument':
+                    this.updateTextDocument(document, e.text);
                     return;
             }
         });
@@ -90,7 +99,6 @@ class LabnoteEditorProvider {
         return vscode.workspace.applyEdit(edit);
     }
     getWebviewContent() {
-        // Use CDN for markdown-it and turndown libraries
         const markdownitScript = 'https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js';
         const turndownScript = 'https://unpkg.com/turndown/dist/turndown.js';
         return `
@@ -103,89 +111,13 @@ class LabnoteEditorProvider {
                 <script src="${markdownitScript}"></script>
                 <script src="${turndownScript}"></script>
                 <style>
-                    body, html {
-                        margin: 0;
-                        padding: 0;
-                        height: 100%;
-                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-                        background-color: var(--vscode-editor-background);
-                        color: var(--vscode-editor-foreground);
-                        display: flex;
-                        flex-direction: column;
-                    }
-                    .controls {
-                        padding: 10px;
-                        border-bottom: 1px solid var(--vscode-editorWidget-border);
-                        display: flex;
-                        justify-content: flex-end;
-                        flex-shrink: 0;
-                    }
-                    button {
-                        background-color: var(--vscode-button-background);
-                        color: var(--vscode-button-foreground);
-                        border: none;
-                        padding: 8px 16px;
-                        cursor: pointer;
-                        border-radius: 5px;
-                    }
-                    button:hover {
-                        background-color: var(--vscode-button-hoverBackground);
-                    }
-                    #editor {
-                        flex-grow: 1;
-                        padding: 20px;
-                        overflow-y: auto;
-                        font-size: 16px;
-                        line-height: 1.6;
-                    }
-                    #editor:focus {
-                        outline: none;
-                    }
-
-                    /* Basic Markdown Styles */
-                    #editor h1, #editor h2, #editor h3, #editor h4 {
-                        border-bottom: 1px solid var(--vscode-editorWidget-border);
-                        padding-bottom: .3em;
-                    }
-                    #editor blockquote {
-                        border-left: .25em solid var(--vscode-editorWidget-border);
-                        padding: 0 1em;
-                        color: var(--vscode-editor-foreground);
-                        opacity: 0.8;
-                    }
-                    #editor code {
-                        background-color: var(--vscode-textBlockQuote-background);
-                        padding: .2em .4em;
-                        margin: 0;
-                        font-size: 85%;
-                        border-radius: 3px;
-                    }
-                    #editor pre {
-                        padding: 16px;
-                        overflow: auto;
-                        font-size: 85%;
-                        line-height: 1.45;
-                        background-color: var(--vscode-textBlockQuote-background);
-                        border-radius: 3px;
-                    }
-                    #editor table {
-                        border-collapse: collapse;
-                        width: 100%;
-                    }
-                    #editor th, #editor td {
-                        border: 1px solid var(--vscode-editorWidget-border);
-                        padding: 8px;
-                    }
-                    #editor th {
-                        background-color: var(--vscode-toolbar-hoverBackground);
-                    }
-                    #editor hr {
-                        border: 0;
-                        height: .25em;
-                        padding: 0;
-                        margin: 24px 0;
-                        background-color: var(--vscode-editorWidget-border);
-                    }
+                    body { font-family: var(--vscode-editor-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif); background-color: var(--vscode-editor-background); color: var(--vscode-editor-foreground); padding: 1rem; }
+                    .controls { margin-bottom: 1rem; }
+                    #editor { outline: none; padding: 1rem; border: 1px solid var(--vscode-input-border, #ccc); border-radius: 4px; min-height: 80vh; }
+                    button { background-color: var(--vscode-button-background); color: var(--vscode-button-foreground); border: 1px solid var(--vscode-button-border); padding: 0.5em 1em; cursor: pointer; border-radius: 2px; }
+                    button:hover { background-color: var(--vscode-button-hoverBackground); }
+                    .ai-fill-btn { background-color: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: 1px solid var(--vscode-button-border); padding: 2px 8px; font-size: 12px; cursor: pointer; border-radius: 3px; margin-left: 10px; float: right; }
+                    .ai-fill-btn:hover { background-color: var(--vscode-button-secondaryHoverBackground); }
                 </style>
             </head>
             <body>
@@ -199,47 +131,96 @@ class LabnoteEditorProvider {
                     const editor = document.getElementById('editor');
                     const saveButton = document.getElementById('save-button');
 
-                    // Initialize markdown-it and turndown
-                    const md = window.markdownit({
-                        html: true,
-                        linkify: true,
-                        typographer: true
-                    });
-                    const turndownService = new TurndownService({ 
-                        headingStyle: 'atx', 
-                        codeBlockStyle: 'fenced' 
-                    });
-
+                    const md = window.markdownit({ html: true, linkify: true, typographer: true });
+                    const turndownService = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' });
                     let lastKnownContent = '';
 
-                    // Handle messages from the extension
+                    function renderContent(markdown) {
+                        const html = md.render(markdown);
+                        const tempDiv = document.createElement('div');
+                        tempDiv.innerHTML = html;
+
+                        const uoHeadings = tempDiv.querySelectorAll('h3');
+                        uoHeadings.forEach(h3 => {
+                            // ⭐️ [버그 수정] UO ID 뒤에 설명이 있어도 ID를 정확히 찾도록 정규식 수정
+                            const match = h3.textContent.match(/\[(U[A-Z]{1,3}\d{3,4})/);
+                            if (match) {
+                                const uoId = match[1];
+                                let nextElement = h3.nextElementSibling;
+                                while(nextElement && nextElement.tagName !== 'H3') {
+                                    if (nextElement.tagName === 'H4') {
+                                        if (nextElement.querySelector('.ai-fill-btn')) {
+                                            nextElement = nextElement.nextElementSibling;
+                                            continue;
+                                        }
+                                        const sectionName = Array.from(nextElement.childNodes).filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join('').trim();
+                                        if (sectionName) {
+                                            const button = document.createElement('button');
+                                            button.className = 'ai-fill-btn';
+                                            button.textContent = 'AI로 채우기';
+                                            button.onclick = (e) => {
+                                                e.stopPropagation();
+                                                vscode.postMessage({ type: 'populate', uoId: uoId, section: sectionName });
+                                            };
+                                            nextElement.appendChild(button);
+                                        }
+                                    }
+                                    nextElement = nextElement.nextElementSibling;
+                                }
+                            }
+                        });
+                        editor.innerHTML = tempDiv.innerHTML;
+                    }
+
+                    function getCleanMarkdown() {
+                        const editorClone = editor.cloneNode(true);
+                        editorClone.querySelectorAll('.ai-fill-btn').forEach(btn => btn.remove());
+                        return turndownService.turndown(editorClone.innerHTML);
+                    }
+
                     window.addEventListener('message', event => {
                         const message = event.data;
                         switch (message.type) {
                             case 'update':
                                 const newContent = message.text;
-                                // Only update if content has actually changed to avoid losing cursor position
                                 if (newContent !== lastKnownContent) {
                                     lastKnownContent = newContent;
-                                    // Render markdown to HTML and set it in the editor
-                                    editor.innerHTML = md.render(newContent);
+                                    renderContent(newContent);
                                 }
+                                break;
+                            case 'updateSection':
+                                const { uoId, section, htmlContent } = message;
+                                const allH3 = Array.from(editor.querySelectorAll('h3'));
+                                for(const h3 of allH3) {
+                                    if (h3.textContent.includes(\`[\${uoId}\`)) {
+                                        let nextElement = h3.nextElementSibling;
+                                        while(nextElement && nextElement.tagName !== 'H3') {
+                                            if (nextElement.tagName === 'H4' && nextElement.textContent.includes(section)) {
+                                                let placeholder = nextElement.nextElementSibling;
+                                                if(placeholder && (placeholder.tagName === 'P' || placeholder.tagName === 'UL' || placeholder.tagName === 'LI')) {
+                                                    const newElement = document.createElement('div');
+                                                    newElement.innerHTML = htmlContent;
+                                                    placeholder.replaceWith(...newElement.childNodes);
+                                                }
+                                                break; 
+                                            }
+                                            nextElement = nextElement.nextElementSibling;
+                                        }
+                                        break; 
+                                    }
+                                }
+                                const newMarkdown = getCleanMarkdown();
+                                lastKnownContent = newMarkdown;
+                                vscode.postMessage({ type: 'updateTextDocument', text: newMarkdown });
                                 break;
                         }
                     });
 
-                    // Save button listener
                     saveButton.addEventListener('click', () => {
-                        // Convert HTML back to markdown
-                        const newMarkdown = turndownService.turndown(editor.innerHTML);
-                        lastKnownContent = newMarkdown; // Update last known content
-                        
-                        vscode.postMessage({
-                            type: 'save',
-                            text: newMarkdown
-                        });
+                        const newMarkdown = getCleanMarkdown();
+                        lastKnownContent = newMarkdown;
+                        vscode.postMessage({ type: 'save', text: newMarkdown });
                     });
-
                 </script>
             </body>
             </html>
@@ -248,4 +229,5 @@ class LabnoteEditorProvider {
 }
 exports.LabnoteEditorProvider = LabnoteEditorProvider;
 LabnoteEditorProvider.viewType = 'labnote.visualEditor';
+LabnoteEditorProvider.panels = new Map();
 //# sourceMappingURL=LabnoteEditorProvider.js.map
