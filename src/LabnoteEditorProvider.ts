@@ -1,5 +1,12 @@
 import * as vscode from 'vscode';
 
+/**
+ * ⭐️ [v2.2.0 수정 클래스]
+ * Visual Editor의 YAML Front Matter 파싱 오류를 해결하기 위해 로직을 대폭 수정했습니다.
+ * - YAML과 Markdown 본문을 분리하여 처리합니다.
+ * - 확장(Extension)이 YAML을 관리하고, 웹뷰(Webview)는 본문만 수정하도록 역할 분담.
+ * - 이를 통해 `turndown` 라이브러리가 YAML을 손상시키는 문제를 원천적으로 방지합니다.
+ */
 export class LabnoteEditorProvider implements vscode.CustomTextEditorProvider {
 
     public static readonly viewType = 'labnote.visualEditor';
@@ -22,7 +29,7 @@ export class LabnoteEditorProvider implements vscode.CustomTextEditorProvider {
         }
     }
 
-    constructor(private readonly context: vscode.ExtensionContext) { }
+    constructor(private readonly context: vscode.ExtensionContext) { } 
 
     public async resolveCustomTextEditor(
         document: vscode.TextDocument,
@@ -47,9 +54,17 @@ export class LabnoteEditorProvider implements vscode.CustomTextEditorProvider {
 
         webviewPanel.webview.onDidReceiveMessage(e => {
             switch (e.type) {
-                case 'updateTextDocument':
-                    this.updateTextDocument(document, e.text);
+                case 'updateTextDocument': {
+                    const originalText = document.getText();
+                    const match = originalText.match(/^(---[\s\S]*?---\s*)/);
+                    const yaml = match ? match[1] : '';
+                    const newFullText = yaml + e.text; // e.text is markdown body from webview
+
+                    if (newFullText !== originalText) {
+                        this.updateTextDocument(document, newFullText);
+                    }
                     return;
+                }
                 case 'populate':
                     vscode.commands.executeCommand('labnote.ai.populateSection.webview', document.uri, e.uoId, e.section);
                     return;
@@ -101,30 +116,26 @@ export class LabnoteEditorProvider implements vscode.CustomTextEditorProvider {
                         const md = window.markdownit({ html: true, linkify: true, typographer: true });
                         const turndownService = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' });
 
-                        // ⭐️ 마크다운 형식이 깨지는 문제를 해결하기 위한 turndown 규칙 추가
-                        turndownService.addRule('yamlFrontMatter', {
-                            filter: (node, options) => {
-                                return node.nodeName === 'PRE' && node.firstChild && node.firstChild.nodeName === 'CODE' && /---/.test(node.firstChild.textContent);
-                            },
-                            replacement: (content, node) => {
-                                return '---\\n' + node.firstChild.textContent + '\\n---\\n';
+                        let lastKnownBodyContent = '';
+                        let isInternalUpdate = false;
+
+                        function splitYamlAndBody(text) {
+                            const match = text.match(/^(---[\s\S]*?---\s*)/);
+                            if (match) {
+                                const yaml = match[1];
+                                const body = text.substring(yaml.length);
+                                return { yaml, body };
                             }
-                        });
-                        turndownService.addRule('horizontalRule', {
-                            filter: 'hr',
-                            replacement: () => '\\n---\\n'
-                        });
+                            return { yaml: '', body: text };
+                        }
 
-
-                        let lastKnownContent = '';
-
-                        function renderContent(markdown) {
-                            const html = md.render(markdown);
+                        function renderContent(markdownBody) {
+                            const html = md.render(markdownBody);
                             const tempDiv = document.createElement('div');
                             tempDiv.innerHTML = html;
 
                             tempDiv.querySelectorAll('h3').forEach(h3 => {
-                                const match = h3.textContent.match(/\\[(U[A-Z]{2,3}\\d{3,4})\\]/);
+                                const match = h3.textContent.match(/\\[(U[A-Z]{2,3}\\\d{3,4})\\]/);
                                 if (match) {
                                     const uoId = match[1];
                                     let nextElement = h3.nextElementSibling;
@@ -151,7 +162,11 @@ export class LabnoteEditorProvider implements vscode.CustomTextEditorProvider {
                                     }
                                 }
                             });
+                            
+                            isInternalUpdate = true;
                             editor.innerHTML = tempDiv.innerHTML;
+                            // Use a timeout to allow the DOM to update before re-enabling input events
+                            setTimeout(() => { isInternalUpdate = false; }, 50);
                         }
 
                         function getCleanMarkdown() {
@@ -162,48 +177,60 @@ export class LabnoteEditorProvider implements vscode.CustomTextEditorProvider {
                         
                         let debounceTimer;
                         editor.addEventListener('input', () => {
+                            if (isInternalUpdate) return;
+
                             clearTimeout(debounceTimer);
                             debounceTimer = setTimeout(() => {
-                                const newMarkdown = getCleanMarkdown();
-                                if (newMarkdown !== lastKnownContent) {
-                                    lastKnownContent = newMarkdown;
-                                    vscode.postMessage({ type: 'updateTextDocument', text: newMarkdown });
+                                const newMarkdownBody = getCleanMarkdown();
+                                if (newMarkdownBody !== lastKnownBodyContent) {
+                                    lastKnownBodyContent = newMarkdownBody;
+                                    vscode.postMessage({ type: 'updateTextDocument', text: newMarkdownBody });
                                 }
                             }, 500);
                         });
 
                         window.addEventListener('message', event => {
                             const message = event.data;
-                            if (message.type === 'update') {
-                                const newContent = message.text;
-                                if (newContent !== lastKnownContent) {
-                                    lastKnownContent = newContent;
-                                    renderContent(newContent);
-                                }
-                            } else if (message.type === 'updateSection') {
-                               const { uoId, section, htmlContent } = message;
-                                const allH3 = Array.from(editor.querySelectorAll('h3'));
-                                for(const h3 of allH3) {
-                                    if (h3.textContent.includes(\`[\${uoId}\`)) {
-                                        let nextElement = h3.nextElementSibling;
-                                        while(nextElement && nextElement.tagName !== 'H3') {
-                                            if (nextElement.tagName === 'H4' && nextElement.textContent.includes(section)) {
-                                                let placeholder = nextElement.nextElementSibling;
-                                                if(placeholder && (placeholder.tagName === 'P' || placeholder.tagName === 'UL' || placeholder.tagName === 'LI')) {
-                                                    const newElement = document.createElement('div');
-                                                    newElement.innerHTML = htmlContent;
-                                                    placeholder.replaceWith(...newElement.childNodes);
-                                                }
-                                                break; 
-                                            }
-                                            nextElement = nextElement.nextElementSibling;
-                                        }
-                                        break; 
+                            switch (message.type) {
+                                case 'update': {
+                                    const { body } = splitYamlAndBody(message.text);
+                                    if (body !== lastKnownBodyContent) {
+                                        lastKnownBodyContent = body;
+                                        renderContent(body);
                                     }
+                                    break;
                                 }
-                                const newMarkdown = getCleanMarkdown();
-                                lastKnownContent = newMarkdown;
-                                vscode.postMessage({ type: 'updateTextDocument', text: newMarkdown });
+                                case 'updateSection': {
+                                   const { uoId, section, htmlContent } = message;
+                                   const allH3 = Array.from(editor.querySelectorAll('h3'));
+                                   for(const h3 of allH3) {
+                                       if (h3.textContent.includes('[' + uoId + ']')) {
+                                           let nextElement = h3.nextElementSibling;
+                                           while(nextElement && nextElement.tagName !== 'H3') {
+                                               if (nextElement.tagName === 'H4' && nextElement.textContent.includes(section)) {
+                                                   let placeholder = nextElement.nextElementSibling;
+                                                   if(placeholder && (placeholder.tagName === 'P' || placeholder.tagName === 'UL' || placeholder.tagName === 'LI')) {
+                                                       const newElement = document.createElement('div');
+                                                       newElement.innerHTML = htmlContent;
+                                                       
+                                                       isInternalUpdate = true;
+                                                       placeholder.replaceWith(...newElement.childNodes);
+                                                       setTimeout(() => { isInternalUpdate = false; }, 50);
+
+                                                       // Trigger update after AI content is inserted
+                                                       const newMarkdownBody = getCleanMarkdown();
+                                                       lastKnownBodyContent = newMarkdownBody;
+                                                       vscode.postMessage({ type: 'updateTextDocument', text: newMarkdownBody });
+                                                   }
+                                                   break; 
+                                               }
+                                               nextElement = nextElement.nextElementSibling;
+                                           }
+                                           break; 
+                                       }
+                                   }
+                                   break;
+                                }
                             }
                         });
                     });

@@ -763,8 +763,12 @@ function getPopulateWebviewContent(section, options) {
     </html>`;
 }
 /**
- * ⭐️ [최종 수정 함수]
- * 모든 문제를 해결하기 위해 로직을 완전히 새로 작성했습니다.
+ * ⭐️ [v2.2.0 수정 함수]
+ * 섹션 채우기 기능의 컨텍스트 식별 정확도를 높이기 위해 로직을 수정했습니다.
+ * 1. 커서/입력 기반으로 UO와 섹션 정보를 먼저 확립합니다.
+ * 2. 문서 전체를 순회하며, 정확한 UO 블록 내에서 해당 섹션을 찾습니다.
+ * 3. 섹션 시작점 아래에서 플레이스홀더(...)를 찾아 범위를 반환합니다.
+ * 이 방식은 동일 UO ID가 여러번 사용되거나 문서 구조가 복잡할 때 발생하던 오류를 해결합니다.
  */
 function findSectionContext(document, positionOrContext) {
     const fileContent = document.getText();
@@ -780,7 +784,7 @@ function findSectionContext(document, positionOrContext) {
             const lineText = document.lineAt(i).text;
             if (!currentSection) {
                 const sectionMatch = lineText.match(/^####\s*([A-Za-z\s&]+)/);
-                if (sectionMatch) {
+                if (sectionMatch && positionOrContext.line > i) { // 커서가 섹션 제목 아래에 있어야 함
                     currentSection = sectionMatch[1].trim();
                 }
             }
@@ -802,19 +806,16 @@ function findSectionContext(document, positionOrContext) {
     // 2. 확립된 정보를 바탕으로 문서 전체에서 정확한 위치와 플레이스홀더 찾기
     const uoRegex = new RegExp(`^###\\s*\\[${uoId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]`);
     const sectionRegex = new RegExp(`^####\\s*${section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
-    let uoLineNum = -1;
+    let inTargetUo = false;
     let sectionLineNum = -1;
     for (let i = 0; i < document.lineCount; i++) {
         const lineText = document.lineAt(i).text;
-        if (uoRegex.test(lineText)) {
-            uoLineNum = i;
+        if (lineText.match(/^###\s*\[U[A-Z]{2,3}\d{3,4}\]/)) {
+            inTargetUo = uoRegex.test(lineText);
         }
-        if (uoLineNum !== -1 && sectionRegex.test(lineText)) {
+        if (inTargetUo && sectionRegex.test(lineText)) {
             sectionLineNum = i;
             break;
-        }
-        if (uoLineNum !== -1 && i > uoLineNum && lineText.startsWith("###")) {
-            return null; // 다른 UO를 찾았는데 아직 섹션을 못찾았으면 실패
         }
     }
     if (sectionLineNum === -1)

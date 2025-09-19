@@ -93,7 +93,7 @@ function registerCommands(context: vscode.ExtensionContext, outputChannel: vscod
                 prompt: '생성할 연구노트의 핵심 내용을 입력하세요.',
                 placeHolder: '예: Golden Gate Assembly 이용한 플라스미드 제작'
             }).then(userInput => {
-                if (userInput) interactiveGenerateFlow(userInput, outputChannel);
+                if (userInput) interactiveGenerateFlow(context, userInput, outputChannel);
             });
         }),
         vscode.commands.registerCommand('labnote.ai.populateSection', () => populateSectionFlow(context, outputChannel)),
@@ -306,7 +306,7 @@ async function reorderLabnotesCommand() {
     await reorderLabnoteFolders(labnoteRoot);
 }
 
-async function interactiveGenerateFlow(userInput: string, outputChannel: vscode.OutputChannel) {
+async function interactiveGenerateFlow(context: vscode.ExtensionContext, userInput: string, outputChannel: vscode.OutputChannel) {
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
         title: "LabNote AI 분석 중...",
@@ -335,7 +335,7 @@ async function interactiveGenerateFlow(userInput: string, outputChannel: vscode.
             progress.report({ increment: 10, message: "실험 구조 분석 중..." });
             const baseUrl = getBaseUrl();
             if (!baseUrl) return;
-            const { ALL_WORKFLOWS, ALL_UOS } = await fetchConstants(baseUrl, outputChannel);
+            const { ALL_WORKFLOWS, ALL_UOS } = await fetchConstants(context, baseUrl, outputChannel);
             const finalWorkflowId = await showWorkflowSelectionMenu(ALL_WORKFLOWS);
             if (!finalWorkflowId) return;
             const finalUoIds = await showUnifiedUoSelectionMenu(ALL_UOS, []);
@@ -796,8 +796,12 @@ function getPopulateWebviewContent(section: string, options: string[]): string {
 }
 
 /**
- * ⭐️ [최종 수정 함수]
- * 모든 문제를 해결하기 위해 로직을 완전히 새로 작성했습니다.
+ * ⭐️ [v2.2.0 수정 함수]
+ * 섹션 채우기 기능의 컨텍스트 식별 정확도를 높이기 위해 로직을 수정했습니다.
+ * 1. 커서/입력 기반으로 UO와 섹션 정보를 먼저 확립합니다.
+ * 2. 문서 전체를 순회하며, 정확한 UO 블록 내에서 해당 섹션을 찾습니다.
+ * 3. 섹션 시작점 아래에서 플레이스홀더(...)를 찾아 범위를 반환합니다.
+ * 이 방식은 동일 UO ID가 여러번 사용되거나 문서 구조가 복잡할 때 발생하던 오류를 해결합니다.
  */
 function findSectionContext(document: vscode.TextDocument, positionOrContext: vscode.Position | { uoId: string, section: string }): SectionContext | null {
     const fileContent = document.getText();
@@ -815,7 +819,7 @@ function findSectionContext(document: vscode.TextDocument, positionOrContext: vs
             const lineText = document.lineAt(i).text;
             if (!currentSection) {
                 const sectionMatch = lineText.match(/^####\s*([A-Za-z\s&]+)/);
-                if (sectionMatch) {
+                if (sectionMatch && positionOrContext.line > i) { // 커서가 섹션 제목 아래에 있어야 함
                     currentSection = sectionMatch[1].trim();
                 }
             }
@@ -838,20 +842,19 @@ function findSectionContext(document: vscode.TextDocument, positionOrContext: vs
     const uoRegex = new RegExp(`^###\\s*\\[${uoId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]`);
     const sectionRegex = new RegExp(`^####\\s*${section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
     
-    let uoLineNum = -1;
+    let inTargetUo = false;
     let sectionLineNum = -1;
 
     for (let i = 0; i < document.lineCount; i++) {
         const lineText = document.lineAt(i).text;
-        if (uoRegex.test(lineText)) {
-            uoLineNum = i;
+
+        if (lineText.match(/^###\s*\[U[A-Z]{2,3}\d{3,4}\]/)) {
+            inTargetUo = uoRegex.test(lineText);
         }
-        if (uoLineNum !== -1 && sectionRegex.test(lineText)) {
+
+        if (inTargetUo && sectionRegex.test(lineText)) {
             sectionLineNum = i;
-            break; 
-        }
-        if (uoLineNum !== -1 && i > uoLineNum && lineText.startsWith("###")) {
-            return null; // 다른 UO를 찾았는데 아직 섹션을 못찾았으면 실패
+            break;
         }
     }
     
@@ -871,7 +874,7 @@ function findSectionContext(document: vscode.TextDocument, positionOrContext: vs
     return null;
 }
 
-async function fetchConstants(baseUrl: string, outputChannel: vscode.OutputChannel): Promise<{ ALL_WORKFLOWS: { [id: string]: string }, ALL_UOS: { [id: string]: string } }> {
+async function fetchConstants(context: vscode.ExtensionContext, baseUrl: string, outputChannel: vscode.OutputChannel): Promise<{ ALL_WORKFLOWS: { [id: string]: string }, ALL_UOS: { [id: string]: string } }> {
     try {
         const response = await fetch(`${baseUrl}/constants`, { headers: getApiHeaders() });
         if (!response.ok) {
@@ -880,9 +883,40 @@ async function fetchConstants(baseUrl: string, outputChannel: vscode.OutputChann
         return await response.json();
     } catch (e: any) {
         outputChannel.appendLine(`[Error] 백엔드에서 상수를 가져올 수 없습니다: ${e.message}. 로컬 폴백을 사용합니다.`);
+        
+        const workflowPath = resolveConfiguredPath(context, 'workflowsPath', 'workflows_en.md');
+        const hwUoPath = resolveConfiguredPath(context, 'hwUnitOperationsPath', 'unitoperations_hw_en.md');
+        const swUoPath = resolveConfiguredPath(context, 'swUnitOperationsPath', 'unitoperations_sw_en.md');
+
+        const workflowContent = fs.readFileSync(workflowPath, 'utf-8');
+        const hwUoContent = fs.readFileSync(hwUoPath, 'utf-8');
+        const swUoContent = fs.readFileSync(swUoPath, 'utf-8');
+
+        const workflows = logic.parseWorkflows(workflowContent);
+        const hwUos = logic.parseUnitOperations(hwUoContent);
+        const swUos = logic.parseUnitOperations(swUoContent);
+
+        const allWorkflows: { [id: string]: string } = {};
+        for (const wf of workflows) {
+            allWorkflows[wf.id] = wf.name;
+        }
+
+        const allUos: { [id: string]: string } = {};
+        for (const uo of [...hwUos, ...swUos]) {
+            allUos[uo.id] = uo.name;
+        }
+
+        if (Object.keys(allWorkflows).length === 0 && Object.keys(allUos).length === 0) {
+            outputChannel.appendLine(`[Error] 로컬 폴백 파일도 읽을 수 없습니다. 기본 상수를 사용합니다.`);
+            return {
+                ALL_WORKFLOWS: { "WD070": "Vector Design" },
+                ALL_UOS: { "UHW400": "Manual" }
+            };
+        }
+
         return {
-            ALL_WORKFLOWS: { "WD070": "Vector Design" },
-            ALL_UOS: { "UHW400": "Manual" }
+            ALL_WORKFLOWS: allWorkflows,
+            ALL_UOS: allUos
         };
     }
 }
