@@ -786,8 +786,8 @@ function getPopulateWebviewContent(section, options) {
     </html>`;
 }
 /**
- * [가장 중요한 수정 함수]
- * 커서 위치 또는 (UO ID + 섹션 이름) 객체를 받아 해당 섹션의 컨텍스트를 찾습니다.
+ * ⭐️ [최종 수정 함수]
+ * 이 함수가 모든 문제의 원인이었습니다. 아래 코드로 완전히 교체해주세요.
  */
 function findSectionContext(document, positionOrContext) {
     const fileContent = document.getText();
@@ -812,7 +812,6 @@ function findSectionContext(document, positionOrContext) {
             return null;
         for (let i = sectionLineNum - 1; i >= 0; i--) {
             const lineText = document.lineAt(i).text;
-            // ⭐️ [수정된 부분 1] UO ID 뒤에 설명이 있어도 ID를 정확히 찾도록 정규식 수정
             const uoMatch = lineText.match(/^###\s*\[(U[A-Z]{1,3}\d{3,4})/);
             if (uoMatch) {
                 uoId = uoMatch[1];
@@ -824,7 +823,6 @@ function findSectionContext(document, positionOrContext) {
     else {
         uoId = positionOrContext.uoId;
         section = positionOrContext.section;
-        // ⭐️ [수정된 부분 2] 웹뷰에서 넘어온 ID로 헤더를 찾을 때도 설명이 있는 경우를 허용하도록 정규식 수정
         const uoRegex = new RegExp(`^###\\s*\\[${uoId}`);
         for (let i = 0; i < document.lineCount; i++) {
             if (uoRegex.test(document.lineAt(i).text)) {

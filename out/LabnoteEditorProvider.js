@@ -142,8 +142,8 @@ class LabnoteEditorProvider {
 
                         const uoHeadings = tempDiv.querySelectorAll('h3');
                         uoHeadings.forEach(h3 => {
-                            // ⭐️ [버그 수정] UO ID 뒤에 설명이 있어도 ID를 정확히 찾도록 정규식 수정
-                            const match = h3.textContent.match(/\[(U[A-Z]{1,3}\d{3,4})/);
+                            // ⭐️ [버그 수정] 잘못된 정규식을 올바르게 수정
+                            const match = h3.textContent.match(/\\[(U[A-Z]{1,3}\\d{3,4})/);
                             if (match) {
                                 const uoId = match[1];
                                 let nextElement = h3.nextElementSibling;
