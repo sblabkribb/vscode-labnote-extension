@@ -1,6 +1,5 @@
 # 🔬 LabNote AI Assistant
 
-
 **LabNote AI Assistant**는 Visual Studio Code에서 연구노트 작성을 돕는 AI 기반 확장 프로그램입니다. 복잡한 실험 과정의 문서화를 간소화하고, 표준화된 템플릿을 통해 체계적인 기록 관리를 지원하며, AI 기능을 활용하여 연구노트의 초안 생성 및 내용 채우기를 자동화합니다.
 
 ---
@@ -38,21 +37,22 @@ LabNote AI Assistant는 VS Code 확장 프로그램 API를 기반으로, AI 백�
 ```mermaid
 graph TD
     subgraph VS Code
-        A[VS Code UI / Editor] <--> B[Extension Host (extension.ts)];
+        A[VS Code UI / Editor] --> B[Extension Host];
+        B --> A;
     end
 
     subgraph "LabNote AI Assistant"
         B -- Command Execution --> C{Command Handler};
         C -- Manages --> D[Manager Commands];
         C -- Manages --> E[AI Commands];
-        C -- Interacts --> F[Visual Editor (LabnoteEditorProvider)];
+        C -- Interacts --> F[Visual Editor];
         C -- Interacts --> G[Copilot Chat Participant];
 
-        D -- Uses --> H[Core Logic (logic.ts)];
+        D -- Uses --> H[Core Logic];
         E -- Uses --> H;
         F -- Uses --> H;
 
-        H -- Manages --> I[File System & Templates (FileSystemProvider)];
+        H -- Manages --> I[File System & Templates];
     end
 
     subgraph External
@@ -63,7 +63,7 @@ graph TD
     G -- HTTP Request --> J;
 
     style A fill:#2c2c2c,stroke:#fff,stroke-width:2px
-    style B fill:#2c2c2c,stroke:#fff,stroke-width:2px
+    style B fill:#2c2c2c,stroke:#fff,stroke-width:2px,color:#fff
     style J fill:#4caf50,stroke:#fff,stroke-width:2px,color:#fff
 ````
 
@@ -189,3 +189,4 @@ sequenceDiagram
   * **AI 생성 콘텐츠**: AI가 생성한 초안은 사용자의 작업을 돕기 위한 보조 자료이며, 최종 콘텐츠에 대한 책임과 권리는 이를 채택하고 수정한 사용자에게 귀속됩니다.
 
 -----
+
