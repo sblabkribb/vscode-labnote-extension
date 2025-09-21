@@ -254,9 +254,9 @@ function parseReadmeFrontMatter(fileContent) {
 function createUnitOperationContent(selectedUo, userDescription, date, experimenter) {
     const formattedDateTime = getSeoulDateTimeString(date);
     const descriptionPart = userDescription ? ` ${userDescription}` : '';
-    const uoDescriptionLine = selectedUo.description ? `\n\n> **Description**: ${selectedUo.description}` : '';
+    const uoDescriptionLine = selectedUo.description ? `\n\n- **Description**: ${selectedUo.description}` : '';
     const finalExperimenter = experimenter !== undefined ? experimenter : getDefaultExperimenter();
-    return `\n\n<!-- Unit Operation Separator -->\n\n### [${selectedUo.id} ${selectedUo.name}]${descriptionPart}${uoDescriptionLine}\n\n#### Meta\n> Experimenter: ${finalExperimenter}\n> Start_date: '${formattedDateTime}'\n> End_date: ''\n\n#### Input\n> (samples from the previous step) \n\n#### Reagent\n> (e.g. enzyme, buffer, etc.) \n\n#### Consumables\n> (e.g. filter, well-plate, etc.) \n\n#### Equipment\n> (e.g. centrifuge, spectrophotometer, etc.) \n\n#### Method\n> (method used in this step) \n\n#### Output\n> (samples to the next step) \n\n#### Results & Discussions\n> (Any results and discussions. Link file path if needed)\n\n<!-- End of Unit Operation -->\n`;
+    return `\n\n### [${selectedUo.id} ${selectedUo.name}]${descriptionPart}${uoDescriptionLine}\n\n#### Meta\n- Experimenter: ${finalExperimenter}\n- Start_date: '${formattedDateTime}'\n- End_date: ''\n\n#### Input\n- (samples from the previous step)\n\n#### Reagent\n- (e.g. enzyme, buffer, etc.)\n\n#### Consumables\n- (e.g. filter, well-plate, etc.)\n\n#### Equipment\n- (e.g. centrifuge, spectrophotometer, etc.)\n\n#### Method\n- (method used in this step)\n\n#### Output\n- (samples to the next step)\n\n#### Results & Discussions\n- (Any results and discussions. Link file path if needed)\n\n`;
 }
 function parseUnitOperations(content) {
     const unitOperations = [];

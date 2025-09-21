@@ -8,9 +8,9 @@ const fetch = require('node-fetch');
 
 // --- 타입 정의 ---
 interface ChatResponse { response: string; conversation_id: string; }
-interface PopulateResponse { 
-    uo_id: string; 
-    section: string; 
+interface PopulateResponse {
+    uo_id: string;
+    section: string;
     options: string[];
     supervisor_evaluations?: any[];
 }
@@ -55,7 +55,7 @@ function getBaseUrl(): string | null {
 export function activate(context: vscode.ExtensionContext) {
     const outputChannel = vscode.window.createOutputChannel("LabNote AI");
     outputChannel.appendLine("LabNote AI/Manager extension is now active.");
-    
+
     initializeResources(context);
     registerCommands(context, outputChannel);
     registerEventListeners(context);
@@ -107,8 +107,8 @@ function registerCommands(context: vscode.ExtensionContext, outputChannel: vscod
         vscode.commands.registerCommand('labnote.manager.reorderWorkflows', reorderWorkflowsCommand),
         vscode.commands.registerCommand('labnote.manager.reorderLabnotes', reorderLabnotesCommand)
     );
-    
-    context.subscriptions.push(vscode.commands.registerCommand('labnote.ai.populateSection.webview', 
+
+    context.subscriptions.push(vscode.commands.registerCommand('labnote.ai.populateSection.webview',
         (documentUri: vscode.Uri, uoId: string, section: string) => {
             populateSectionFromWebview(context, outputChannel, documentUri, uoId, section);
         })
@@ -208,7 +208,7 @@ async function newWorkflowCommand(customWorkflowsPath: string) {
         if (description === undefined) return;
         const result = logic.createNewWorkflow(realFsProvider, activeUri.fsPath, selectedWorkflow, description);
         const doc = await vscode.workspace.openTextDocument(activeUri);
-        const insertPos = findInsertPosBeforeEndMarker(doc, ''); 
+        const insertPos = findInsertPosBeforeEndMarker(doc, '');
         const we = new vscode.WorkspaceEdit();
         we.insert(activeUri, insertPos, result.textToInsert);
         await vscode.workspace.applyEdit(we);
@@ -377,7 +377,7 @@ async function populateSectionFlow(extensionContext: vscode.ExtensionContext, ou
 }
 
 async function populateSectionFromWebview(
-    extensionContext: vscode.ExtensionContext, 
+    extensionContext: vscode.ExtensionContext,
     outputChannel: vscode.OutputChannel,
     documentUri: vscode.Uri,
     uoId: string,
@@ -708,12 +708,12 @@ function findInsertPosBeforeEndMarker(doc: vscode.TextDocument, endMarker: strin
 
 function createPopulateWebviewPanel(section: string, options: string[]): vscode.WebviewPanel {
     const panel = vscode.window.createWebviewPanel(
-        'labnoteAiPopulate', 
-        `AI 제안: ${section}`, 
-        vscode.ViewColumn.Beside, 
-        { 
+        'labnoteAiPopulate',
+        `AI 제안: ${section}`,
+        vscode.ViewColumn.Beside,
+        {
             enableScripts: true,
-            retainContextWhenHidden: true 
+            retainContextWhenHidden: true
         }
     );
     panel.webview.html = getPopulateWebviewContent(section, options);
@@ -775,8 +775,8 @@ function getPopulateWebviewContent(section: string, options: string[]): string {
             applyBtn.addEventListener('click', () => {
                 const editedContent = editorTextarea.value;
                 if (selectedOriginalContent) {
-                    vscode.postMessage({ 
-                        command: 'applyAndLearn', 
+                    vscode.postMessage({
+                        command: 'applyAndLearn',
                         chosen_original: selectedOriginalContent,
                         chosen_edited: editedContent
                     });
@@ -788,78 +788,97 @@ function getPopulateWebviewContent(section: string, options: string[]): string {
 }
 
 /**
- * 섹션 채우기 기능의 컨텍스트 식별 정확도를 높이기 위해 로직을 수정했습니다.
- * 1. 커서/입력 기반으로 UO와 섹션 정보를 먼저 확립합니다.
- * 2. 문서 전체를 순회하며, 정확한 UO 블록 내에서 해당 섹션을 찾습니다.
- * 3. 섹션 시작점 아래에서 플레이스홀더(...)를 찾아 범위를 반환합니다.
- * 이 방식은 동일 UO ID가 여러번 사용되거나 문서 구조가 복잡할 때 발생하던 오류를 해결합니다.
+ * [최종 수정] 문서 전체를 파싱하여 구조(지도)를 만든 후, 커서 위치가 어느 섹션에 속하는지 확인하는 가장 안정적인 방법입니다.
  */
 function findSectionContext(document: vscode.TextDocument, positionOrContext: vscode.Position | { uoId: string, section: string }): SectionContext | null {
     const fileContent = document.getText();
     const yamlMatch = fileContent.match(/^---\s*[\r\n]+title:\s*["']?(.*?)["']?[\r\n]+/);
     const query = yamlMatch ? yamlMatch[1].replace(/\[AI Generated\]\s*/, '').trim() : "Untitled Experiment";
 
-    let uoId: string | undefined;
-    let section: string | undefined;
-
-    if (positionOrContext instanceof vscode.Position) {
-        let currentSection: string | undefined;
-        for (let i = positionOrContext.line; i >= 0; i--) {
-            const lineText = document.lineAt(i).text;
-            if (!currentSection) {
-                const sectionMatch = lineText.match(/^####\s*([A-Za-z\s&]+)/);
-                if (sectionMatch && positionOrContext.line > i) {
-                    currentSection = sectionMatch[1].trim();
-                }
-            }
-            // 정규식을 수정하여 이스케이프된 대괄호(\[)도 인식하도록 변경
-            const uoMatch = lineText.match(/^###\s*\\?\[(U[A-Z]{2,3}\d{3,4}).*?\\?\]/);
-            if (uoMatch) {
-                uoId = uoMatch[1];
-                section = currentSection;
-                break;
-            }
-        }
-    } else {
-        uoId = positionOrContext.uoId;
-        section = positionOrContext.section;
+    // 1. 문서 구조를 나타낼 타입을 명확하게 정의합니다.
+    interface DocumentSection {
+        uoId: string;
+        section: string;
+        startLine: number;
+        endLine: number;
     }
 
-    if (!uoId || !section) return null;
-
-    // 이스케이프된 대괄호를 인식하도록 변경
-    const uoRegex = new RegExp(`^###\\s*\\?\\[${uoId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
-    const sectionRegex = new RegExp(`^####\\s*${section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
-    
-    let inTargetUo = false;
-    let sectionLineNum = -1;
+    // 2. 문서의 모든 UO와 섹션 구조를 한 번의 순회로 파싱하여 지도를 생성합니다.
+    const structureMap: DocumentSection[] = [];
+    let currentUoId: string | null = null;
 
     for (let i = 0; i < document.lineCount; i++) {
         const lineText = document.lineAt(i).text;
-        if (lineText.match(/^###\s*\\?\[U[A-Z]{2,3}\d{3,4}/)) {
-            inTargetUo = uoRegex.test(lineText);
+        const uoMatch = lineText.match(/^###\s*\\?\[(U[A-Z]{2,3}\d{3,4}).*?\\?\]/);
+        if (uoMatch) {
+            currentUoId = uoMatch[1];
         }
-        if (inTargetUo && sectionRegex.test(lineText)) {
-            sectionLineNum = i;
+
+        const sectionMatch = lineText.match(/^####\s*(.*?)\s*$/);
+        if (sectionMatch && currentUoId) {
+            // 이전 섹션이 있다면, 현재 섹션 시작 전 라인을 endLine으로 설정
+            if (structureMap.length > 0) {
+                structureMap[structureMap.length - 1].endLine = i - 1;
+            }
+            structureMap.push({
+                uoId: currentUoId,
+                section: sectionMatch[1].trim(),
+                startLine: i,
+                endLine: document.lineCount - 1 // 기본값으로 문서 끝 라인 설정
+            });
+        }
+    }
+
+    let targetSection: DocumentSection | undefined;
+
+    // 3. 커서 위치 또는 주어진 컨텍스트에 해당하는 섹션을 지도에서 찾기
+    if (positionOrContext instanceof vscode.Position) {
+        const cursorLine = positionOrContext.line;
+        targetSection = structureMap.find(s => cursorLine >= s.startLine && cursorLine <= s.endLine);
+    } else {
+        targetSection = structureMap.find(s => s.uoId === positionOrContext.uoId && s.section === positionOrContext.section);
+    }
+
+    if (!targetSection) {
+        return null;
+    }
+
+    // 4. 대상 섹션의 내용 범위를 정확히 계산
+    const contentStartLine = targetSection.startLine + 1;
+    let contentEndLine = targetSection.endLine;
+
+    // 비어있는 후행 라인을 제거하여 범위 정제
+    for (let i = targetSection.endLine; i >= contentStartLine; i--) {
+        if (!document.lineAt(i).isEmptyOrWhitespace) {
+            contentEndLine = i;
             break;
         }
     }
     
-    if (sectionLineNum === -1) return null;
-    
-    for (let i = sectionLineNum + 1; i < document.lineCount; i++) {
-        const line = document.lineAt(i);
-        if (line.text.startsWith('#')) break;
-        
-        // Quarto가 한 줄로 합친 형식과 원래 형식을 모두 찾도록 변경
-        const placeholderRegex = /^\s*(?:>)?\s*\(.*\)\s*$/;
-        if (placeholderRegex.test(line.text.trim())) {
-            return { uoId, section, query, fileContent, placeholderRange: line.range };
-        }
+    // 섹션에 내용이 전혀 없는 경우, 헤더 바로 아랫줄에 삽입하도록 범위 설정
+    if (contentStartLine > contentEndLine) {
+        const pos = new vscode.Position(contentStartLine, 0);
+        return {
+            uoId: targetSection.uoId,
+            section: targetSection.section,
+            query,
+            fileContent,
+            placeholderRange: new vscode.Range(pos, pos)
+        };
     }
 
-    return null;
+    const startPos = document.lineAt(contentStartLine).range.start;
+    const endPos = document.lineAt(contentEndLine).range.end;
+
+    return {
+        uoId: targetSection.uoId,
+        section: targetSection.section,
+        query,
+        fileContent,
+        placeholderRange: new vscode.Range(startPos, endPos)
+    };
 }
+
 
 async function fetchConstants(context: vscode.ExtensionContext, baseUrl: string, outputChannel: vscode.OutputChannel): Promise<{ ALL_WORKFLOWS: { [id: string]: string }, ALL_UOS: { [id: string]: string } }> {
     try {
@@ -870,7 +889,7 @@ async function fetchConstants(context: vscode.ExtensionContext, baseUrl: string,
         return await response.json();
     } catch (e: any) {
         outputChannel.appendLine(`[Error] 백엔드에서 상수를 가져올 수 없습니다: ${e.message}. 로컬 폴백을 사용합니다.`);
-        
+
         const workflowPath = resolveConfiguredPath(context, 'workflowsPath', 'workflows_en.md');
         const hwUoPath = resolveConfiguredPath(context, 'hwUnitOperationsPath', 'unitoperations_hw_en.md');
         const swUoPath = resolveConfiguredPath(context, 'swUnitOperationsPath', 'unitoperations_sw_en.md');

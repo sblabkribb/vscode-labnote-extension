@@ -746,8 +746,8 @@ function getPopulateWebviewContent(section, options) {
             applyBtn.addEventListener('click', () => {
                 const editedContent = editorTextarea.value;
                 if (selectedOriginalContent) {
-                    vscode.postMessage({ 
-                        command: 'applyAndLearn', 
+                    vscode.postMessage({
+                        command: 'applyAndLearn',
                         chosen_original: selectedOriginalContent,
                         chosen_edited: editedContent
                     });
@@ -758,69 +758,77 @@ function getPopulateWebviewContent(section, options) {
     </html>`;
 }
 /**
- * 섹션 채우기 기능의 컨텍스트 식별 정확도를 높이기 위해 로직을 수정했습니다.
- * 1. 커서/입력 기반으로 UO와 섹션 정보를 먼저 확립합니다.
- * 2. 문서 전체를 순회하며, 정확한 UO 블록 내에서 해당 섹션을 찾습니다.
- * 3. 섹션 시작점 아래에서 플레이스홀더(...)를 찾아 범위를 반환합니다.
- * 이 방식은 동일 UO ID가 여러번 사용되거나 문서 구조가 복잡할 때 발생하던 오류를 해결합니다.
+ * [최종 수정] 문서 전체를 파싱하여 구조(지도)를 만든 후, 커서 위치가 어느 섹션에 속하는지 확인하는 가장 안정적인 방법입니다.
  */
 function findSectionContext(document, positionOrContext) {
     const fileContent = document.getText();
     const yamlMatch = fileContent.match(/^---\s*[\r\n]+title:\s*["']?(.*?)["']?[\r\n]+/);
     const query = yamlMatch ? yamlMatch[1].replace(/\[AI Generated\]\s*/, '').trim() : "Untitled Experiment";
-    let uoId;
-    let section;
-    if (positionOrContext instanceof vscode.Position) {
-        let currentSection;
-        for (let i = positionOrContext.line; i >= 0; i--) {
-            const lineText = document.lineAt(i).text;
-            if (!currentSection) {
-                const sectionMatch = lineText.match(/^####\s*([A-Za-z\s&]+)/);
-                if (sectionMatch && positionOrContext.line > i) {
-                    currentSection = sectionMatch[1].trim();
-                }
-            }
-            const uoMatch = lineText.match(/^###\s*\[(U[A-Z]{2,3}\d{3,4}).*?\]/);
-            if (uoMatch) {
-                uoId = uoMatch[1];
-                section = currentSection;
-                break;
-            }
-        }
-    }
-    else {
-        uoId = positionOrContext.uoId;
-        section = positionOrContext.section;
-    }
-    if (!uoId || !section)
-        return null;
-    const uoRegex = new RegExp(`^###\\s*\\[${uoId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
-    const sectionRegex = new RegExp(`^####\\s*${section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
-    let inTargetUo = false;
-    let sectionLineNum = -1;
+    // 2. 문서의 모든 UO와 섹션 구조를 한 번의 순회로 파싱하여 지도를 생성합니다.
+    const structureMap = [];
+    let currentUoId = null;
     for (let i = 0; i < document.lineCount; i++) {
         const lineText = document.lineAt(i).text;
-        if (lineText.match(/^###\s*\[U[A-Z]{2,3}\d{3,4}/)) {
-            inTargetUo = uoRegex.test(lineText);
+        const uoMatch = lineText.match(/^###\s*\\?\[(U[A-Z]{2,3}\d{3,4}).*?\\?\]/);
+        if (uoMatch) {
+            currentUoId = uoMatch[1];
         }
-        if (inTargetUo && sectionRegex.test(lineText)) {
-            sectionLineNum = i;
-            break;
+        const sectionMatch = lineText.match(/^####\s*(.*?)\s*$/);
+        if (sectionMatch && currentUoId) {
+            // 이전 섹션이 있다면, 현재 섹션 시작 전 라인을 endLine으로 설정
+            if (structureMap.length > 0) {
+                structureMap[structureMap.length - 1].endLine = i - 1;
+            }
+            structureMap.push({
+                uoId: currentUoId,
+                section: sectionMatch[1].trim(),
+                startLine: i,
+                endLine: document.lineCount - 1 // 기본값으로 문서 끝 라인 설정
+            });
         }
     }
-    if (sectionLineNum === -1)
+    let targetSection;
+    // 3. 커서 위치 또는 주어진 컨텍스트에 해당하는 섹션을 지도에서 찾기
+    if (positionOrContext instanceof vscode.Position) {
+        const cursorLine = positionOrContext.line;
+        targetSection = structureMap.find(s => cursorLine >= s.startLine && cursorLine <= s.endLine);
+    }
+    else {
+        targetSection = structureMap.find(s => s.uoId === positionOrContext.uoId && s.section === positionOrContext.section);
+    }
+    if (!targetSection) {
         return null;
-    for (let i = sectionLineNum + 1; i < document.lineCount; i++) {
-        const line = document.lineAt(i);
-        if (line.text.startsWith('#'))
+    }
+    // 4. 대상 섹션의 내용 범위를 정확히 계산
+    const contentStartLine = targetSection.startLine + 1;
+    let contentEndLine = targetSection.endLine;
+    // 비어있는 후행 라인을 제거하여 범위 정제
+    for (let i = targetSection.endLine; i >= contentStartLine; i--) {
+        if (!document.lineAt(i).isEmptyOrWhitespace) {
+            contentEndLine = i;
             break;
-        // 정규식을 수정하여 '>'로 시작하는 인용구 형식의 플레이스홀더를 찾도록 변경합니다.
-        const placeholderRegex = /^\s*>\s*(-\s*)?\(.*\)\s*$/;
-        if (placeholderRegex.test(line.text.trim())) {
-            return { uoId, section, query, fileContent, placeholderRange: line.range };
         }
     }
-    return null;
+    // 섹션에 내용이 전혀 없는 경우, 헤더 바로 아랫줄에 삽입하도록 범위 설정
+    if (contentStartLine > contentEndLine) {
+        const pos = new vscode.Position(contentStartLine, 0);
+        return {
+            uoId: targetSection.uoId,
+            section: targetSection.section,
+            query,
+            fileContent,
+            placeholderRange: new vscode.Range(pos, pos)
+        };
+    }
+    const startPos = document.lineAt(contentStartLine).range.start;
+    const endPos = document.lineAt(contentEndLine).range.end;
+    return {
+        uoId: targetSection.uoId,
+        section: targetSection.section,
+        query,
+        fileContent,
+        placeholderRange: new vscode.Range(startPos, endPos)
+    };
 }
 async function fetchConstants(context, baseUrl, outputChannel) {
     try {

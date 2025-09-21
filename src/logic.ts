@@ -270,7 +270,7 @@ export function createUnitOperationContent(selectedUo: ParsedUnitOperation, user
 
     const finalExperimenter = experimenter !== undefined ? experimenter : getDefaultExperimenter();
 
-    return `\n\n### [${selectedUo.id} ${selectedUo.name}]${descriptionPart}${uoDescriptionLine}\n\n#### Meta\n\n> Experimenter: ${finalExperimenter}\n> Start_date: '${formattedDateTime}'\n> End_date: ''\n\n#### Input\n\n> (samples from the previous step) \n\n#### Reagent\n\n> (e.g. enzyme, buffer, etc.) \n\n#### Consumables\n\n> (e.g. filter, well-plate, etc.) \n\n#### Equipment\n\n> (e.g. centrifuge, spectrophotometer, etc.) \n\n#### Method\n\n> (method used in this step) \n\n#### Output\n\n> (samples to the next step) \n\n#### Results & Discussions\n\n> (Any results and discussions. Link file path if needed)\n\n`;
+    return `\n\n### [${selectedUo.id} ${selectedUo.name}]${descriptionPart}${uoDescriptionLine}\n\n#### Meta\n- Experimenter: ${finalExperimenter}\n- Start_date: '${formattedDateTime}'\n- End_date: ''\n\n#### Input\n- (samples from the previous step)\n\n#### Reagent\n- (e.g. enzyme, buffer, etc.)\n\n#### Consumables\n- (e.g. filter, well-plate, etc.)\n\n#### Equipment\n- (e.g. centrifuge, spectrophotometer, etc.)\n\n#### Method\n- (method used in this step)\n\n#### Output\n- (samples to the next step)\n\n#### Results & Discussions\n- (Any results and discussions. Link file path if needed)\n\n`;
 }
 
 export interface ParsedUnitOperation {
