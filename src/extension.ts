@@ -344,7 +344,7 @@ async function interactiveGenerateFlow(context: vscode.ExtensionContext, userInp
             const createScaffoldResponse = await fetch(`${baseUrl}/create_scaffold`, {
                 method: 'POST',
                 headers: getApiHeaders(),
-                body: JSON.stringify({ query: userInput, workflow_id: finalWorkflowId, unit_operation_id: finalUoIds, experimenter: "AI Assistant" }),
+                body: JSON.stringify({ query: userInput, workflow_id: finalWorkflowId, unit_operation_ids: finalUoIds, experimenter: "AI Assistant" }),
             });
             if (!createScaffoldResponse.ok) throw new Error(`뼈대 생성 실패 (HTTP ${createScaffoldResponse.status}): ${await createScaffoldResponse.text()}`);
             const scaffoldData = await createScaffoldResponse.json() as { files: Record<string, string> };
