@@ -812,7 +812,6 @@ function findSectionContext(document: vscode.TextDocument, positionOrContext: vs
                     currentSection = sectionMatch[1].trim();
                 }
             }
-            // ⭐️ 수정된 부분: UO ID 뒤에 설명이 있어도 ID를 정확히 추출하도록 정규식 수정
             const uoMatch = lineText.match(/^###\s*\[(U[A-Z]{2,3}\d{3,4}).*?\]/);
             if (uoMatch) {
                 uoId = uoMatch[1];
@@ -850,7 +849,8 @@ function findSectionContext(document: vscode.TextDocument, positionOrContext: vs
         const line = document.lineAt(i);
         if (line.text.startsWith('#')) break;
         
-        const placeholderRegex = /^\s*(-\s*)?\(.*\)\s*$/;
+        // 정규식을 수정하여 '>'로 시작하는 인용구 형식의 플레이스홀더를 찾도록 변경합니다.
+        const placeholderRegex = /^\s*>\s*(-\s*)?\(.*\)\s*$/;
         if (placeholderRegex.test(line.text.trim())) {
             return { uoId, section, query, fileContent, placeholderRange: line.range };
         }
