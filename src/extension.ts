@@ -788,7 +788,6 @@ function getPopulateWebviewContent(section: string, options: string[]): string {
 }
 
 /**
- * ⭐️ [v2.2.0 수정 함수]
  * 섹션 채우기 기능의 컨텍스트 식별 정확도를 높이기 위해 로직을 수정했습니다.
  * 1. 커서/입력 기반으로 UO와 섹션 정보를 먼저 확립합니다.
  * 2. 문서 전체를 순회하며, 정확한 UO 블록 내에서 해당 섹션을 찾습니다.
@@ -924,7 +923,7 @@ async function showUnifiedUoSelectionMenu(uos: { [id: string]: string }, recomme
         return a.id.localeCompare(b.id);
     });
     const selectedItems = await vscode.window.showQuickPick(allUoItems, {
-        title: 'Unit Operation 선택 (AI 추천 항목이 미리 선택됨)',
+        title: 'Unit Operation 선택 (복수 선택 가능)',
         canPickMany: true,
         matchOnDescription: true,
         placeHolder: '체크박스를 클릭하여 선택/해제 후 Enter',
