@@ -812,7 +812,8 @@ function findSectionContext(document: vscode.TextDocument, positionOrContext: vs
                     currentSection = sectionMatch[1].trim();
                 }
             }
-            const uoMatch = lineText.match(/^###\s*\[(U[A-Z]{2,3}\d{3,4}).*?\]/);
+            // 정규식을 수정하여 이스케이프된 대괄호(\[)도 인식하도록 변경
+            const uoMatch = lineText.match(/^###\s*\\?\[(U[A-Z]{2,3}\d{3,4}).*?\\?\]/);
             if (uoMatch) {
                 uoId = uoMatch[1];
                 section = currentSection;
@@ -826,7 +827,8 @@ function findSectionContext(document: vscode.TextDocument, positionOrContext: vs
 
     if (!uoId || !section) return null;
 
-    const uoRegex = new RegExp(`^###\\s*\\[${uoId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
+    // 이스케이프된 대괄호를 인식하도록 변경
+    const uoRegex = new RegExp(`^###\\s*\\?\\[${uoId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
     const sectionRegex = new RegExp(`^####\\s*${section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
     
     let inTargetUo = false;
@@ -834,7 +836,7 @@ function findSectionContext(document: vscode.TextDocument, positionOrContext: vs
 
     for (let i = 0; i < document.lineCount; i++) {
         const lineText = document.lineAt(i).text;
-        if (lineText.match(/^###\s*\[U[A-Z]{2,3}\d{3,4}/)) {
+        if (lineText.match(/^###\s*\\?\[U[A-Z]{2,3}\d{3,4}/)) {
             inTargetUo = uoRegex.test(lineText);
         }
         if (inTargetUo && sectionRegex.test(lineText)) {
@@ -849,8 +851,8 @@ function findSectionContext(document: vscode.TextDocument, positionOrContext: vs
         const line = document.lineAt(i);
         if (line.text.startsWith('#')) break;
         
-        // 정규식을 수정하여 '>'로 시작하는 인용구 형식의 플레이스홀더를 찾도록 변경합니다.
-        const placeholderRegex = /^\s*>\s*(-\s*)?\(.*\)\s*$/;
+        // Quarto가 한 줄로 합친 형식과 원래 형식을 모두 찾도록 변경
+        const placeholderRegex = /^\s*(?:>)?\s*\(.*\)\s*$/;
         if (placeholderRegex.test(line.text.trim())) {
             return { uoId, section, query, fileContent, placeholderRange: line.range };
         }

@@ -758,7 +758,6 @@ function getPopulateWebviewContent(section, options) {
     </html>`;
 }
 /**
- * ⭐️ [v2.2.0 수정 함수]
  * 섹션 채우기 기능의 컨텍스트 식별 정확도를 높이기 위해 로직을 수정했습니다.
  * 1. 커서/입력 기반으로 UO와 섹션 정보를 먼저 확립합니다.
  * 2. 문서 전체를 순회하며, 정확한 UO 블록 내에서 해당 섹션을 찾습니다.
@@ -781,7 +780,6 @@ function findSectionContext(document, positionOrContext) {
                     currentSection = sectionMatch[1].trim();
                 }
             }
-            // ⭐️ 수정된 부분: UO ID 뒤에 설명이 있어도 ID를 정확히 추출하도록 정규식 수정
             const uoMatch = lineText.match(/^###\s*\[(U[A-Z]{2,3}\d{3,4}).*?\]/);
             if (uoMatch) {
                 uoId = uoMatch[1];
@@ -816,7 +814,8 @@ function findSectionContext(document, positionOrContext) {
         const line = document.lineAt(i);
         if (line.text.startsWith('#'))
             break;
-        const placeholderRegex = /^\s*(-\s*)?\(.*\)\s*$/;
+        // 정규식을 수정하여 '>'로 시작하는 인용구 형식의 플레이스홀더를 찾도록 변경합니다.
+        const placeholderRegex = /^\s*>\s*(-\s*)?\(.*\)\s*$/;
         if (placeholderRegex.test(line.text.trim())) {
             return { uoId, section, query, fileContent, placeholderRange: line.range };
         }
@@ -881,7 +880,7 @@ async function showUnifiedUoSelectionMenu(uos, recommendedIds) {
         return a.id.localeCompare(b.id);
     });
     const selectedItems = await vscode.window.showQuickPick(allUoItems, {
-        title: 'Unit Operation 선택 (AI 추천 항목이 미리 선택됨)',
+        title: 'Unit Operation 선택 (복수 선택 가능)',
         canPickMany: true,
         matchOnDescription: true,
         placeHolder: '체크박스를 클릭하여 선택/해제 후 Enter',
