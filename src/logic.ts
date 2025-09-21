@@ -118,7 +118,7 @@ export function createNewLabnote(provider: FileSystemProvider, workspaceRoot: st
     };
 
     const yamlText = yaml.dump(readmeFrontMatter, { sortKeys: false, lineWidth: -1 });
-    const readmeContent = `---\n${yamlText}---\n\n## 🎯 실험 목표\n| 이 실험의 주된 목표와 가설을 간략하게 작성합니다.\n\n## 🗂️ 관련 워크플로\n\n| 아래 표시 사이에 관련된 워크플로 파일 목록을 입력합니다.\n| \`F1\`, \`New workflow\` 명령 수행시 해당 목록은 표시된 위치 사이에 자동 추가됩니다.\n| 위 YAML 블록의 author: 항목에 입력된 이름은 워크플로와 유닛오퍼레이션 생성시 실험자 이름으로 자동 입력됩니다.\n\n\n\n\n\n`;
+    const readmeContent = `---\n${yamlText}---\n\n## 🎯 실험 목표\n> 이 실험의 주된 목표와 가설을 간략하게 작성합니다.\n\n## 🗂️ 관련 워크플로\n\n> 아래 표시 사이에 관련된 워크플로 파일 목록을 입력합니다.\n> \`F1\`, \`New workflow\` 명령 수행시 해당 목록은 표시된 위치 사이에 자동 추가됩니다.\n> 위 YAML 블록의 author: 항목에 입력된 이름은 워크플로와 유닛오퍼레이션 생성시 실험자 이름으로 자동 입력됩니다.\n\n\n\n\n\n`;
 
     const newReadmePath = path.join(newDirPath, 'README.md');
     provider.writeTextFile(newReadmePath, readmeContent);
@@ -232,7 +232,7 @@ export function createWorkflowFileContent(workflow: ParsedWorkflow, userDescript
     const yamlText = yaml.dump(frontMatter, { sortKeys: false, lineWidth: -1 });
 
     const bodyTitle = `## [${workflow.id} ${workflow.name}]${userDescription ? ` ${userDescription}` : ''}`;
-    const bodyDescription = `| 이 워크플로의 설명을 간략하게 작성합니다 (아래 설명은 템플릿으로 사용자 목적에 맞도록 수정합니다)\n| ${workflow.description}`;
+    const bodyDescription = `> 이 워크플로의 설명을 간략하게 작성합니다 (아래 설명은 템플릿으로 사용자 목적에 맞도록 수정합니다)\n> ${workflow.description}`;
     const unitOperationSection = `## 🗂️ 관련 유닛오퍼레이션\n| 관련된 유닛오퍼레이션 목록을 아래 표시 사이에 입력합니다.\n| \`F1\`, \`New HW/SW Unit Operation\` 명령 수행시 해당 목록은 표시된 위치 사이에 자동 추가됩니다.\n\n\n\n\n`;
 
     return `---\n${yamlText}---\n\n${bodyTitle}\n${bodyDescription}\n\n${unitOperationSection}\n`;

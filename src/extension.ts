@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as logic from './logic';
 import { FileSystemProvider } from './fileSystemProvider';
-import { LabnoteEditorProvider } from './LabnoteEditorProvider';
 
 const fetch = require('node-fetch');
 
@@ -56,8 +55,6 @@ function getBaseUrl(): string | null {
 export function activate(context: vscode.ExtensionContext) {
     const outputChannel = vscode.window.createOutputChannel("LabNote AI");
     outputChannel.appendLine("LabNote AI/Manager extension is now active.");
-
-    context.subscriptions.push(LabnoteEditorProvider.register(context));
     
     initializeResources(context);
     registerCommands(context, outputChannel);
@@ -84,10 +81,6 @@ function registerCommands(context: vscode.ExtensionContext, outputChannel: vscod
     };
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('labnote.openVisualEditor', (uri: vscode.Uri) => {
-            vscode.commands.executeCommand('vscode.openWith', uri, LabnoteEditorProvider.viewType);
-        }),
-
         vscode.commands.registerCommand('labnote.ai.generate', () => {
             vscode.window.showInputBox({
                 prompt: '생성할 연구노트의 핵심 내용을 입력하세요.',
@@ -458,7 +451,6 @@ async function processAndApplyPopulation(
                     if (isFromWebview) {
                         const md = require('markdown-it')();
                         const htmlContent = md.render(chosen_edited);
-                        LabnoteEditorProvider.updateWebviewSection(documentUri, uoId, section, htmlContent);
                     } else {
                         const editor = vscode.window.activeTextEditor;
                         if (editor && editor.document.uri.toString() === documentUri.toString()) {

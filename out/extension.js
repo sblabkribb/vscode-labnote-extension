@@ -39,7 +39,6 @@ const vscode = __importStar(require("vscode"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const logic = __importStar(require("./logic"));
-const LabnoteEditorProvider_1 = require("./LabnoteEditorProvider");
 const fetch = require('node-fetch');
 // --- 상수 및 전역 헬퍼 ---
 const realFsProvider = {
@@ -71,7 +70,6 @@ function getBaseUrl() {
 function activate(context) {
     const outputChannel = vscode.window.createOutputChannel("LabNote AI");
     outputChannel.appendLine("LabNote AI/Manager extension is now active.");
-    context.subscriptions.push(LabnoteEditorProvider_1.LabnoteEditorProvider.register(context));
     initializeResources(context);
     registerCommands(context, outputChannel);
     registerEventListeners(context);
@@ -91,9 +89,7 @@ function registerCommands(context, outputChannel) {
         hwUnitOperations: resolveConfiguredPath(context, 'hwUnitOperationsPath', 'unitoperations_hw_en.md'),
         swUnitOperations: resolveConfiguredPath(context, 'swUnitOperationsPath', 'unitoperations_sw_en.md'),
     };
-    context.subscriptions.push(vscode.commands.registerCommand('labnote.openVisualEditor', (uri) => {
-        vscode.commands.executeCommand('vscode.openWith', uri, LabnoteEditorProvider_1.LabnoteEditorProvider.viewType);
-    }), vscode.commands.registerCommand('labnote.ai.generate', () => {
+    context.subscriptions.push(vscode.commands.registerCommand('labnote.ai.generate', () => {
         vscode.window.showInputBox({
             prompt: '생성할 연구노트의 핵심 내용을 입력하세요.',
             placeHolder: '예: Golden Gate Assembly 이용한 플라스미드 제작'
@@ -433,7 +429,6 @@ async function processAndApplyPopulation(extensionContext, outputChannel, docume
                 if (isFromWebview) {
                     const md = require('markdown-it')();
                     const htmlContent = md.render(chosen_edited);
-                    LabnoteEditorProvider_1.LabnoteEditorProvider.updateWebviewSection(documentUri, uoId, section, htmlContent);
                 }
                 else {
                     const editor = vscode.window.activeTextEditor;

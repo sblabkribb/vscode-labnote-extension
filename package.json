@@ -20,8 +20,10 @@
     "onCommand:labnote.ai.chat",
     "onCommand:labnote.manager.insertTable",
     "onCommand:labnote.manager.reorderWorkflows",
-    "onCommand:labnote.manager.reorderLabnotes",
-    "onCustomEditor:labnote.visualEditor"
+    "onCommand:labnote.manager.reorderLabnotes"
+  ],
+  "extensionDependencies": [
+    "quarto.quarto"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -72,32 +74,6 @@
       {
         "command": "labnote.manager.reorderLabnotes",
         "title": "LabNote: 실험 폴더 번호 재정렬"
-      },
-      {
-        "command": "labnote.openVisualEditor",
-        "title": "Open in Visual Labnote Editor",
-        "icon": "$(edit)"
-      }
-    ],
-    "menus": {
-      "explorer/context": [
-        {
-          "when": "resourceExtname == .md",
-          "command": "labnote.openVisualEditor",
-          "group": "navigation"
-        }
-      ]
-    },
-    "customEditors": [
-      {
-        "viewType": "labnote.visualEditor",
-        "displayName": "Visual Labnote Editor",
-        "selector": [
-          {
-            "filenamePattern": "*.md"
-          }
-        ],
-        "priority": "option"
       }
     ],
     "configuration": {
