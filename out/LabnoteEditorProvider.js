@@ -36,11 +36,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.LabnoteEditorProvider = void 0;
 const vscode = __importStar(require("vscode"));
 /**
- * ⭐️ [v2.2.0 수정 클래스]
- * Visual Editor의 YAML Front Matter 파싱 오류를 해결하기 위해 로직을 대폭 수정했습니다.
+ * ⭐️ [v2.3.0 수정 최종본]
+ * Visual Editor가 YAML Front Matter를 손상시키는 문제를 해결하기 위해 로직을 대폭 수정했습니다.
  * - YAML과 Markdown 본문을 분리하여 처리합니다.
  * - 확장(Extension)이 YAML을 관리하고, 웹뷰(Webview)는 본문만 수정하도록 역할 분담.
- * - 이를 통해 `turndown` 라이브러리가 YAML을 손상시키는 문제를 원천적으로 방지합니다.
+ * - 이를 통해 HTML 변환 라이브러리가 YAML을 손상시키는 문제를 원천적으로 방지합니다.
  */
 class LabnoteEditorProvider {
     static register(context) {
@@ -80,7 +80,8 @@ class LabnoteEditorProvider {
                     const originalText = document.getText();
                     const match = originalText.match(/^(---[\s\S]*?---\s*)/);
                     const yaml = match ? match[1] : '';
-                    const newFullText = yaml + e.text; // e.text is markdown body from webview
+                    // 웹뷰는 본문(e.text)만 보내고, 확장 프로그램이 원본 YAML과 합칩니다.
+                    const newFullText = yaml + e.text;
                     if (newFullText !== originalText) {
                         this.updateTextDocument(document, newFullText);
                     }
@@ -91,6 +92,7 @@ class LabnoteEditorProvider {
                     return;
             }
         });
+        // 웹뷰에 초기 데이터를 보낼 때도 YAML을 분리해서 보냅니다.
         webviewPanel.webview.postMessage({ type: 'update', text: document.getText() });
     }
     updateTextDocument(document, text) {
@@ -102,6 +104,7 @@ class LabnoteEditorProvider {
         const markdownitScriptUri = "https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js";
         const turndownScriptUri = "https://unpkg.com/turndown/dist/turndown.js";
         const nonce = new Date().getTime() + '' + new Date().getMilliseconds();
+        // Webview 스크립트 부분 수정: YAML을 분리하고 본문만 처리하도록 로직 변경
         return `
             <!DOCTYPE html>
             <html lang="en">
@@ -116,6 +119,7 @@ class LabnoteEditorProvider {
                 <script nonce="${nonce}" src="${markdownitScriptUri}"></script>
                 <script nonce="${nonce}" src="${turndownScriptUri}"></script>
                 <style>
+                    /* 스타일은 기존과 동일 */
                     body { font-family: var(--vscode-editor-font-family, sans-serif); background-color: var(--vscode-editor-background); color: var(--vscode-editor-foreground); padding: 1rem; }
                     #editor { outline: none; padding: 1rem; border: 1px solid var(--vscode-input-border, #ccc); border-radius: 4px; min-height: 80vh; }
                     .ai-fill-btn { float: right; margin-left: 10px; background-color: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: 1px solid var(--vscode-button-border); padding: 2px 8px; font-size: 12px; cursor: pointer; border-radius: 3px; }
@@ -136,8 +140,9 @@ class LabnoteEditorProvider {
                         let lastKnownBodyContent = '';
                         let isInternalUpdate = false;
 
+                        // YAML과 본문을 분리하는 함수
                         function splitYamlAndBody(text) {
-                            const match = text.match(/^(---[\s\S]*?---\s*)/);
+                            const match = text.match(/^(---[\\s\\S]*?---\\s*)/);
                             if (match) {
                                 const yaml = match[1];
                                 const body = text.substring(yaml.length);
@@ -146,13 +151,16 @@ class LabnoteEditorProvider {
                             return { yaml: '', body: text };
                         }
 
+                        // ... (renderContent, getCleanMarkdown 함수는 이전과 동일하게 유지) ...
+                        
+                        // 렌더링 함수 (AI 버튼 추가 로직 포함)
                         function renderContent(markdownBody) {
                             const html = md.render(markdownBody);
                             const tempDiv = document.createElement('div');
                             tempDiv.innerHTML = html;
 
                             tempDiv.querySelectorAll('h3').forEach(h3 => {
-                                const match = h3.textContent.match(/\\[(U[A-Z]{2,3}\\\d{3,4})\\]/);
+                                const match = h3.textContent.match(/\\[(U[A-Z]{2,3}\\d{3,4}).*?\\]/); // 정규식 수정
                                 if (match) {
                                     const uoId = match[1];
                                     let nextElement = h3.nextElementSibling;
@@ -182,7 +190,6 @@ class LabnoteEditorProvider {
                             
                             isInternalUpdate = true;
                             editor.innerHTML = tempDiv.innerHTML;
-                            // Use a timeout to allow the DOM to update before re-enabling input events
                             setTimeout(() => { isInternalUpdate = false; }, 50);
                         }
 
@@ -201,6 +208,7 @@ class LabnoteEditorProvider {
                                 const newMarkdownBody = getCleanMarkdown();
                                 if (newMarkdownBody !== lastKnownBodyContent) {
                                     lastKnownBodyContent = newMarkdownBody;
+                                    // 수정된 본문만 전송
                                     vscode.postMessage({ type: 'updateTextDocument', text: newMarkdownBody });
                                 }
                             }, 500);
@@ -210,9 +218,11 @@ class LabnoteEditorProvider {
                             const message = event.data;
                             switch (message.type) {
                                 case 'update': {
+                                    // 전체 텍스트를 받아서 YAML과 본문을 분리
                                     const { body } = splitYamlAndBody(message.text);
                                     if (body !== lastKnownBodyContent) {
                                         lastKnownBodyContent = body;
+                                        // 본문만 렌더링
                                         renderContent(body);
                                     }
                                     break;
@@ -234,7 +244,6 @@ class LabnoteEditorProvider {
                                                        placeholder.replaceWith(...newElement.childNodes);
                                                        setTimeout(() => { isInternalUpdate = false; }, 50);
 
-                                                       // Trigger update after AI content is inserted
                                                        const newMarkdownBody = getCleanMarkdown();
                                                        lastKnownBodyContent = newMarkdownBody;
                                                        vscode.postMessage({ type: 'updateTextDocument', text: newMarkdownBody });

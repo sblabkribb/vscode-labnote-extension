@@ -776,19 +776,18 @@ function findSectionContext(document, positionOrContext) {
     const query = yamlMatch ? yamlMatch[1].replace(/\[AI Generated\]\s*/, '').trim() : "Untitled Experiment";
     let uoId;
     let section;
-    // 1. uoId와 section 정보 확립
     if (positionOrContext instanceof vscode.Position) {
-        // [텍스트 에디터] 커서 위치에서 위로 탐색
         let currentSection;
         for (let i = positionOrContext.line; i >= 0; i--) {
             const lineText = document.lineAt(i).text;
             if (!currentSection) {
                 const sectionMatch = lineText.match(/^####\s*([A-Za-z\s&]+)/);
-                if (sectionMatch && positionOrContext.line > i) { // 커서가 섹션 제목 아래에 있어야 함
+                if (sectionMatch && positionOrContext.line > i) {
                     currentSection = sectionMatch[1].trim();
                 }
             }
-            const uoMatch = lineText.match(/^###\s*\[(U[A-Z]{2,3}\d{3,4})\]/);
+            // ⭐️ 수정된 부분: UO ID 뒤에 설명이 있어도 ID를 정확히 추출하도록 정규식 수정
+            const uoMatch = lineText.match(/^###\s*\[(U[A-Z]{2,3}\d{3,4}).*?\]/);
             if (uoMatch) {
                 uoId = uoMatch[1];
                 section = currentSection;
@@ -797,20 +796,18 @@ function findSectionContext(document, positionOrContext) {
         }
     }
     else {
-        // [웹뷰]
         uoId = positionOrContext.uoId;
         section = positionOrContext.section;
     }
     if (!uoId || !section)
         return null;
-    // 2. 확립된 정보를 바탕으로 문서 전체에서 정확한 위치와 플레이스홀더 찾기
-    const uoRegex = new RegExp(`^###\\s*\\[${uoId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]`);
+    const uoRegex = new RegExp(`^###\\s*\\[${uoId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
     const sectionRegex = new RegExp(`^####\\s*${section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
     let inTargetUo = false;
     let sectionLineNum = -1;
     for (let i = 0; i < document.lineCount; i++) {
         const lineText = document.lineAt(i).text;
-        if (lineText.match(/^###\s*\[U[A-Z]{2,3}\d{3,4}\]/)) {
+        if (lineText.match(/^###\s*\[U[A-Z]{2,3}\d{3,4}/)) {
             inTargetUo = uoRegex.test(lineText);
         }
         if (inTargetUo && sectionRegex.test(lineText)) {
@@ -820,13 +817,12 @@ function findSectionContext(document, positionOrContext) {
     }
     if (sectionLineNum === -1)
         return null;
-    // 3. 찾은 섹션 아래에서 플레이스홀더 찾기
     for (let i = sectionLineNum + 1; i < document.lineCount; i++) {
         const line = document.lineAt(i);
         if (line.text.startsWith('#'))
             break;
         const placeholderRegex = /^\s*(-\s*)?\(.*\)\s*$/;
-        if (placeholderRegex.test(line.text)) {
+        if (placeholderRegex.test(line.text.trim())) {
             return { uoId, section, query, fileContent, placeholderRange: line.range };
         }
     }
