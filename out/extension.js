@@ -99,7 +99,7 @@ function registerCommands(context, outputChannel) {
             placeHolder: '예: Golden Gate Assembly 이용한 플라스미드 제작'
         }).then(userInput => {
             if (userInput)
-                interactiveGenerateFlow(userInput, outputChannel);
+                interactiveGenerateFlow(context, userInput, outputChannel);
         });
     }), vscode.commands.registerCommand('labnote.ai.populateSection', () => populateSectionFlow(context, outputChannel)), vscode.commands.registerCommand('labnote.ai.chat', () => {
         vscode.window.showInputBox({
@@ -292,7 +292,7 @@ async function reorderLabnotesCommand() {
     const labnoteRoot = path.join(workspaceFolders[0].uri.fsPath, 'labnote');
     await reorderLabnoteFolders(labnoteRoot);
 }
-async function interactiveGenerateFlow(userInput, outputChannel) {
+async function interactiveGenerateFlow(context, userInput, outputChannel) {
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
         title: "LabNote AI 분석 중...",
@@ -323,7 +323,7 @@ async function interactiveGenerateFlow(userInput, outputChannel) {
             const baseUrl = getBaseUrl();
             if (!baseUrl)
                 return;
-            const { ALL_WORKFLOWS, ALL_UOS } = await fetchConstants(baseUrl, outputChannel);
+            const { ALL_WORKFLOWS, ALL_UOS } = await fetchConstants(context, baseUrl, outputChannel);
             const finalWorkflowId = await showWorkflowSelectionMenu(ALL_WORKFLOWS);
             if (!finalWorkflowId)
                 return;
@@ -832,7 +832,7 @@ function findSectionContext(document, positionOrContext) {
     }
     return null;
 }
-async function fetchConstants(baseUrl, outputChannel) {
+async function fetchConstants(context, baseUrl, outputChannel) {
     try {
         const response = await fetch(`${baseUrl}/constants`, { headers: getApiHeaders() });
         if (!response.ok) {
@@ -842,9 +842,33 @@ async function fetchConstants(baseUrl, outputChannel) {
     }
     catch (e) {
         outputChannel.appendLine(`[Error] 백엔드에서 상수를 가져올 수 없습니다: ${e.message}. 로컬 폴백을 사용합니다.`);
+        const workflowPath = resolveConfiguredPath(context, 'workflowsPath', 'workflows_en.md');
+        const hwUoPath = resolveConfiguredPath(context, 'hwUnitOperationsPath', 'unitoperations_hw_en.md');
+        const swUoPath = resolveConfiguredPath(context, 'swUnitOperationsPath', 'unitoperations_sw_en.md');
+        const workflowContent = fs.readFileSync(workflowPath, 'utf-8');
+        const hwUoContent = fs.readFileSync(hwUoPath, 'utf-8');
+        const swUoContent = fs.readFileSync(swUoPath, 'utf-8');
+        const workflows = logic.parseWorkflows(workflowContent);
+        const hwUos = logic.parseUnitOperations(hwUoContent);
+        const swUos = logic.parseUnitOperations(swUoContent);
+        const allWorkflows = {};
+        for (const wf of workflows) {
+            allWorkflows[wf.id] = wf.name;
+        }
+        const allUos = {};
+        for (const uo of [...hwUos, ...swUos]) {
+            allUos[uo.id] = uo.name;
+        }
+        if (Object.keys(allWorkflows).length === 0 && Object.keys(allUos).length === 0) {
+            outputChannel.appendLine(`[Error] 로컬 폴백 파일도 읽을 수 없습니다. 기본 상수를 사용합니다.`);
+            return {
+                ALL_WORKFLOWS: { "WD070": "Vector Design" },
+                ALL_UOS: { "UHW400": "Manual" }
+            };
+        }
         return {
-            ALL_WORKFLOWS: { "WD070": "Vector Design" },
-            ALL_UOS: { "UHW400": "Manual" }
+            ALL_WORKFLOWS: allWorkflows,
+            ALL_UOS: allUos
         };
     }
 }
