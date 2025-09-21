@@ -129,7 +129,7 @@ function createNewLabnote(provider, workspaceRoot, experimentTitle) {
         last_updated_date: formattedDate,
     };
     const yamlText = yaml.dump(readmeFrontMatter, { sortKeys: false, lineWidth: -1 });
-    const readmeContent = `---\n${yamlText}---\n\n## 🎯 실험 목표\n> 이 실험의 주된 목표와 가설을 간략하게 작성합니다.\n\n## 🗂️ 관련 워크플로\n\n> 아래 표시 사이에 관련된 워크플로 파일 목록을 입력합니다.\n> \`F1\`, \`New workflow\` 명령 수행시 해당 목록은 표시된 위치 사이에 자동 추가됩니다.\n> 위 YAML 블록의 author: 항목에 입력된 이름은 워크플로와 유닛오퍼레이션 생성시 실험자 이름으로 자동 입력됩니다.\n\n\n\n\n\n`;
+    const readmeContent = `---\n${yamlText}---\n\n## 🎯 실험 목표\n> 이 실험의 주된 목표와 가설을 간략하게 작성합니다.\n\n## 🗂️ 관련 워크플로\n\n> 아래 표시 사이에 관련된 워크플로 파일 목록을 입력합니다.\n> \`F1\`, \`New workflow\` 명령 수행시 해당 목록은 표시된 위치 사이에 자동 추가됩니다.\n> 위 YAML 블록의 author: 항목에 입력된 이름은 워크플로와 유닛오퍼레이션 생성시 실험자 이름으로 자동 입력됩니다.\n\n\n\n\n`;
     const newReadmePath = path.join(newDirPath, 'README.md');
     provider.writeTextFile(newReadmePath, readmeContent);
     const parsedFrontMatter = parseReadmeFrontMatter(readmeContent);
@@ -224,7 +224,7 @@ function createWorkflowFileContent(workflow, userDescription, date, experimenter
     const yamlText = yaml.dump(frontMatter, { sortKeys: false, lineWidth: -1 });
     const bodyTitle = `## [${workflow.id} ${workflow.name}]${userDescription ? ` ${userDescription}` : ''}`;
     const bodyDescription = `> 이 워크플로의 설명을 간략하게 작성합니다 (아래 설명은 템플릿으로 사용자 목적에 맞도록 수정합니다)\n> ${workflow.description}`;
-    const unitOperationSection = `## 🗂️ 관련 유닛오퍼레이션\n| 관련된 유닛오퍼레이션 목록을 아래 표시 사이에 입력합니다.\n| \`F1\`, \`New HW/SW Unit Operation\` 명령 수행시 해당 목록은 표시된 위치 사이에 자동 추가됩니다.\n\n\n\n\n`;
+    const unitOperationSection = `## 🗂️ 관련 유닛오퍼레이션\n> 관련된 유닛오퍼레이션 목록을 아래 표시 사이에 입력합니다.\n> \`F1\`, \`New HW/SW Unit Operation\` 명령 수행시 해당 목록은 표시된 위치 사이에 자동 추가됩니다.\n\n\n\n`;
     return `---\n${yamlText}---\n\n${bodyTitle}\n${bodyDescription}\n\n${unitOperationSection}\n`;
 }
 function parseWorkflowFrontMatter(fileContent) {
@@ -254,9 +254,9 @@ function parseReadmeFrontMatter(fileContent) {
 function createUnitOperationContent(selectedUo, userDescription, date, experimenter) {
     const formattedDateTime = getSeoulDateTimeString(date);
     const descriptionPart = userDescription ? ` ${userDescription}` : '';
-    const uoDescriptionLine = selectedUo.description ? `\n\n- **Description**: ${selectedUo.description}` : '';
+    const uoDescriptionLine = selectedUo.description ? `\n\n> **Description**: ${selectedUo.description}` : '';
     const finalExperimenter = experimenter !== undefined ? experimenter : getDefaultExperimenter();
-    return `\n\n------------------------------------------------------------------------\n\n### [${selectedUo.id} ${selectedUo.name}]${descriptionPart}${uoDescriptionLine}\n\n#### Meta\n- Experimenter: ${finalExperimenter}\n- Start_date: '${formattedDateTime}'\n- End_date: ''\n\n#### Input\n- (samples from the previous step) \n\n#### Reagent\n- (e.g. enzyme, buffer, etc.) \n\n#### Consumables\n- (e.g. filter, well-plate, etc.) \n\n#### Equipment\n- (e.g. centrifuge, spectrophotometer, etc.) \n\n#### Method\n- (method used in this step) \n\n#### Output\n- (samples to the next step) \n\n#### Results & Discussions\n- (Any results and discussions. Link file path if needed)\n\n------------------------------------------------------------------------\n`;
+    return `\n\n<!-- Unit Operation Separator -->\n\n### [${selectedUo.id} ${selectedUo.name}]${descriptionPart}${uoDescriptionLine}\n\n#### Meta\n> Experimenter: ${finalExperimenter}\n> Start_date: '${formattedDateTime}'\n> End_date: ''\n\n#### Input\n> (samples from the previous step) \n\n#### Reagent\n> (e.g. enzyme, buffer, etc.) \n\n#### Consumables\n> (e.g. filter, well-plate, etc.) \n\n#### Equipment\n> (e.g. centrifuge, spectrophotometer, etc.) \n\n#### Method\n> (method used in this step) \n\n#### Output\n> (samples to the next step) \n\n#### Results & Discussions\n> (Any results and discussions. Link file path if needed)\n\n<!-- End of Unit Operation -->\n`;
 }
 function parseUnitOperations(content) {
     const unitOperations = [];
