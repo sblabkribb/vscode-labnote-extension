@@ -20,7 +20,8 @@
     "onCommand:labnote.ai.chat",
     "onCommand:labnote.manager.insertTable",
     "onCommand:labnote.manager.reorderWorkflows",
-    "onCommand:labnote.manager.reorderLabnotes"
+    "onCommand:labnote.manager.reorderLabnotes",
+    "onCommand:labnote.ai.populateSectionFromVisualEditor"
   ],
   "extensionDependencies": [
     "quarto.quarto"
@@ -74,6 +75,10 @@
       {
         "command": "labnote.manager.reorderLabnotes",
         "title": "LabNote: 실험 폴더 번호 재정렬"
+      },
+      {
+        "command": "labnote.ai.populateSectionFromVisualEditor",
+        "title": "LabNote (AI): Visual Editor에서 섹션 내용 채우기"
       }
     ],
     "configuration": {
