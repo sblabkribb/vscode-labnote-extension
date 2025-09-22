@@ -206,39 +206,78 @@ function registerChatParticipant(context: vscode.ExtensionContext, outputChannel
         stream: vscode.ChatResponseStream,
         token: vscode.CancellationToken
     ): Promise<vscode.ChatResult> => {
-        if (request.command === 'new') {
-            stream.markdown("새로운 연구노트 생성을 시작하겠습니다. 실험의 핵심 주제를 말씀해주세요. (예: `DmpR 센서 라이브러리 제작`)");
-            return { metadata: { command: 'new' } };
+
+        outputChannel.appendLine(`[Debug] Chat handler started. Prompt: "${request.prompt}"`);
+
+        // 1. 사용자가 @labnote만 입력한 경우 (메인 메뉴 표시)
+        if (!request.prompt) {
+            try {
+                stream.markdown("안녕하세요! LabNote AI Assistant입니다. 무엇을 도와드릴까요? 🚀\n\n아래 버튼을 선택하여 작업을 시작하거나, 저에게 직접 질문해주세요.");
+                
+                stream.button({
+                    title: '🔬 새 연구노트 생성',
+                    command: 'labnote.ai.generate'
+                });
+                stream.button({
+                    title: '✍️ 섹션 내용 채우기 (AI)',
+                    command: 'labnote.ai.populateSection'
+                });
+                stream.button({
+                    title: '➕ 워크플로우 추가',
+                    command: 'labnote.manager.newWorkflow'
+                });
+                stream.button({
+                    title: '➕ Unit Operation 추가 (HW/SW)',
+                    command: 'labnote.manager.newHwUnitOperation'
+                });
+                stream.button({
+                    title: '🔄 워크플로우 번호 재정렬',
+                    command: 'labnote.manager.reorderWorkflows'
+                });
+                stream.button({
+                    title: '🗂️ 실험 폴더 번호 재정렬',
+                    command: 'labnote.manager.reorderLabnotes'
+                });
+                
+                outputChannel.appendLine(`[Debug] Main menu displayed.`);
+            } catch (e: any) {
+                outputChannel.appendLine(`[Error] Failed to display menu: ${e.message}`);
+            }
+            return {};
         }
+
+        // 2. 사용자가 프롬프트와 함께 입력한 경우 (일반 채팅)
         try {
             stream.progress("LabNote AI 백엔드에 요청 중입니다...");
             const response = await callChatApi(request.prompt, outputChannel, null);
             if (response) {
                 stream.markdown(response.response);
             } else {
-                stream.markdown("죄송합니다. AI로부터 응답을 받지 못했습니다.");
+                stream.markdown("AI로부터 응답을 받지 못했습니다.");
             }
+            outputChannel.appendLine(`[Debug] General chat request processed.`);
         } catch (error: any) {
-            const errorMessage = `오류가 발생했습니다: ${error.message}`;
-            stream.markdown(errorMessage);
-            outputChannel.appendLine(`[Copilot Chat ERROR] ${errorMessage}`);
+            outputChannel.appendLine(`[Error] Chat API call failed: ${error.message}`);
+            stream.markdown(`오류가 발생했습니다: ${error.message}`);
         }
-        return { metadata: { command: request.command || "" } };
+
+        outputChannel.appendLine(`[Debug] Chat handler finished.`);
+        return {};
     };
+
     const participant = vscode.chat.createChatParticipant('labnote.participant', handler);
     participant.iconPath = vscode.Uri.file(path.join(context.extensionPath, 'images', 'icon.png'));
+    
+    // 대화가 끝난 후에도 메뉴를 다시 볼 수 있는 버튼을 제공합니다.
     participant.followupProvider = {
         provideFollowups(result: vscode.ChatResult, context: vscode.ChatContext, token: vscode.CancellationToken) {
             return [{
-                prompt: '새 연구노트 생성',
-                label: '새 연구노트 생성하기',
-                command: 'new'
-            }, {
-                prompt: '현재 실험 주제와 가장 관련있는 SOP 3개를 찾아줘',
-                label: '관련 SOP 검색하기',
+                prompt: '', // 프롬프트를 비워두면 핸들러에서 !request.prompt 조건이 true가 되어 메뉴가 다시 표시됩니다.
+                label: '다른 작업 선택하기',
             }];
         }
     };
+
     context.subscriptions.push(participant);
 }
 
