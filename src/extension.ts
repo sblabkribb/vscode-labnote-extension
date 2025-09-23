@@ -320,6 +320,34 @@ function registerChatParticipant(context: vscode.ExtensionContext, outputChannel
         })
     );
 }
+async function callChatApi(userInput: string, outputChannel: vscode.OutputChannel, stream: vscode.ChatResponseStream, conversationId: string | null = null) {
+    try {
+        stream.progress("LabNote AI 백엔드에 요청 중입니다...");
+        const baseUrl = getBaseUrl();
+        if (!baseUrl) {
+            stream.markdown("오류: Backend URL이 설정되지 않았습니다.");
+            return;
+        }
+        const response = await fetch(`${baseUrl}/chat`, {
+            method: 'POST',
+            headers: getApiHeaders(),
+            body: JSON.stringify({
+                query: userInput,
+                conversation_id: conversationId
+            }),
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`채팅 실패 (HTTP ${response.status}): ${errorText}`);
+        }
+        const chatData = await response.json() as ChatResponse;
+        stream.markdown(chatData.response);
+
+    } catch (error: any) {
+        stream.markdown(`AI와 대화 중 오류가 발생했습니다: ${error.message}`);
+        outputChannel.appendLine(`[ERROR] callChatApi: ${error.stack}`);
+    }
+}
 
 async function newWorkflowCommand(customWorkflowsPath: string) {
     try {
@@ -659,14 +687,22 @@ async function processAndApplyPopulation(
                     });
 
                     if (command === 'applyAndLearn') {
-                        const editor = vscode.window.activeTextEditor;
-                        if (editor && editor.document.uri.toString() === documentUri.toString()) {
+                        // ⭐️ [수정] '활성' 편집기 대신 '보이는' 편집기들 중에서 올바른 파일을 찾도록 변경
+                        const editor = vscode.window.visibleTextEditors.find(
+                            (e) => e.document.uri.toString() === documentUri.toString()
+                        );
+                        
+                        if (editor) {
                             await editor.edit(editBuilder => {
                                 editBuilder.replace(placeholderRange, chosen_edited);
                             });
+                            vscode.window.showInformationMessage(`'${section}' 섹션이 업데이트되었고, AI가 사용자의 수정을 학습합니다.`);
+                        } else {
+                             // 만약 사용자가 파일을 닫아버린 경우
+                            await vscode.env.clipboard.writeText(chosen_edited);
+                            vscode.window.showWarningMessage(`'${section}' 섹션을 적용할 편집기 창을 찾을 수 없습니다. 수정된 내용이 클립보드에 복사되었습니다.`);
                         }
-                        vscode.window.showInformationMessage(`'${section}' 섹션이 업데이트되었고, AI가 사용자의 수정을 학습합니다.`);
-                    } else {
+                    } else { // command === 'copyAndLearn'
                         await vscode.env.clipboard.writeText(chosen_edited);
                         vscode.window.showInformationMessage(`수정된 내용이 클립보드에 복사되었습니다. Visual Editor에 붙여넣으세요.`);
                     }

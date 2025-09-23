@@ -86,7 +86,7 @@
       "properties": {
         "labnote.ai.backendUrl": {
           "type": "string",
-          "default": "http://127.0.0.1:8000",
+          "default": "http://123.37.6.117:31371",
           "description": "The base URL of the LabNote AI backend server (e.g., http://127.0.0.1:8000)."
         },
         "labnote.ai.vesslApiToken": {
