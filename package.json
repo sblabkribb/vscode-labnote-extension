@@ -2,7 +2,7 @@
   "name": "labnote-ai-assistant",
   "displayName": "LabNote AI Assistant",
   "description": "An AI assistant to help with writing lab notes in VS Code.",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "publisher": "BiofoundryLabs",
   "engines": {
     "vscode": "^1.85.0"

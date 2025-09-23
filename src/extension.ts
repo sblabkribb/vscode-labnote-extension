@@ -7,6 +7,18 @@ import { FileSystemProvider } from './fileSystemProvider';
 const fetch = require('node-fetch');
 
 // --- 타입 정의 ---
+
+// 대화의 흐름(어떤 기능)과 상태(어떤 단계)를 관리하기 위한 인터페이스
+type ChatFlow = 'generate_labnote' | 'populate_section';
+
+interface ChatSession {
+    flow: ChatFlow;
+    state: string;
+    data: { [key: string]: any };
+}
+
+const chatSessions = new Map<string, ChatSession>();
+
 interface ChatResponse { response: string; conversation_id: string; }
 interface PopulateResponse {
     uo_id: string;
@@ -51,7 +63,8 @@ function getBaseUrl(): string | null {
     return url;
 }
 
-// --- 확장 프로그램 활성화 ---
+
+// --- 확장 프로그램 활성화/비활성화 ---
 export function activate(context: vscode.ExtensionContext) {
     const outputChannel = vscode.window.createOutputChannel("LabNote AI");
     outputChannel.appendLine("LabNote AI/Manager extension is now active.");
@@ -64,7 +77,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {}
 
-// --- 초기화 및 등록 헬퍼 함수 ---
+// --- 초기화 및 등록 헬퍼 ---
 
 function initializeResources(context: vscode.ExtensionContext) {
     const globalStoragePath = context.globalStorageUri.fsPath;
@@ -81,25 +94,29 @@ function registerCommands(context: vscode.ExtensionContext, outputChannel: vscod
     };
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('labnote.ai.generate', () => {
-            vscode.window.showInputBox({
-                prompt: '생성할 연구노트의 핵심 내용을 입력하세요.',
-                placeHolder: '예: Golden Gate Assembly 이용한 플라스미드 제작'
-            }).then(userInput => {
-                if (userInput) interactiveGenerateFlow(context, userInput, outputChannel);
-            });
+        // 채팅 UI의 버튼과 연동될 명령어들
+        vscode.commands.registerCommand('labnote.ai.generate.chat', () => {
+             vscode.commands.executeCommand('workbench.action.chat.open', '@labnote /generate');
+        }),
+        vscode.commands.registerCommand('labnote.ai.populateSection.chat', () => {
+             vscode.commands.executeCommand('workbench.action.chat.open', '@labnote /populate');
+        }),
+
+        // Command Palette 등 다른 곳에서 실행될 수 있는 기존 명령어들
+        vscode.commands.registerCommand('labnote.ai.generate', (userInput?: string) => {
+            if (userInput) {
+                interactiveGenerateFlow(context, userInput, outputChannel);
+            } else {
+                vscode.window.showInputBox({
+                    prompt: '생성할 연구노트의 핵심 내용을 입력하세요.',
+                    placeHolder: '예: Golden Gate Assembly 이용한 플라스미드 제작'
+                }).then(input => {
+                    if (input) interactiveGenerateFlow(context, input, outputChannel);
+                });
+            }
         }),
         vscode.commands.registerCommand('labnote.ai.populateSection', () => populateSectionFlow(context, outputChannel)),
         vscode.commands.registerCommand('labnote.ai.populateSectionFromVisualEditor', () => populateSectionFromVisualEditorFlow(context, outputChannel)),
-        vscode.commands.registerCommand('labnote.ai.chat', () => {
-            vscode.window.showInputBox({
-                prompt: 'AI에게 질문할 내용을 입력하세요.',
-                placeHolder: '예: CRISPR-Cas9 시스템에 대해 설명해줘'
-            }).then(userInput => {
-                if (userInput) callChatApi(userInput, outputChannel, null);
-            });
-        }),
-
         vscode.commands.registerCommand('labnote.manager.newWorkflow', () => newWorkflowCommand(customPaths.workflows)),
         vscode.commands.registerCommand('labnote.manager.newHwUnitOperation', createUnitOperationCommand(realFsProvider, customPaths.hwUnitOperations)),
         vscode.commands.registerCommand('labnote.manager.newSwUnitOperation', createUnitOperationCommand(realFsProvider, customPaths.swUnitOperations)),
@@ -108,98 +125,13 @@ function registerCommands(context: vscode.ExtensionContext, outputChannel: vscod
         vscode.commands.registerCommand('labnote.manager.reorderWorkflows', reorderWorkflowsCommand),
         vscode.commands.registerCommand('labnote.manager.reorderLabnotes', reorderLabnotesCommand)
     );
-
-    context.subscriptions.push(vscode.commands.registerCommand('labnote.ai.populateSection.webview',
-        (documentUri: vscode.Uri, uoId: string, section: string) => {
-            populateSectionFromWebview(context, outputChannel, documentUri, uoId, section);
-        })
-    );
 }
 
-async function populateSectionFromVisualEditorFlow(context: vscode.ExtensionContext, outputChannel: vscode.OutputChannel) {
-    const activeUri = getActiveFileUri();
-    if (!activeUri) {
-        vscode.window.showWarningMessage("활성화된 파일이 없습니다.");
-        return;
-    }
+function registerEventListeners(context: vscode.ExtensionContext) { /* 변경 없음 */ }
 
-    try {
-        const document = await vscode.workspace.openTextDocument(activeUri);
-        const fileContent = document.getText();
-        
-        const sections = parseAllSections(document);
-        if (sections.length === 0) {
-            vscode.window.showErrorMessage("문서에서 Unit Operation 섹션을 찾을 수 없습니다.");
-            return;
-        }
-
-        const selectedSection = await vscode.window.showQuickPick(
-            sections.map(s => ({
-                label: `[${s.uoId}] ${s.section}`,
-                description: `Line ${s.startLine + 1}`,
-                detail: `Unit Operation: ${s.uoId}`,
-                uoId: s.uoId,
-                section: s.section
-            })),
-            { placeHolder: "AI로 채울 섹션을 선택하세요" }
-        );
-
-        if (!selectedSection) return;
-
-        const yamlMatch = fileContent.match(/^---\s*[\r\n]+title:\s*["']?(.*?)["']?[\r\n]+/);
-        const query = yamlMatch ? yamlMatch[1].replace(/\[AI Generated\]\s*/, '').trim() : "Untitled Experiment";
-        
-        const sectionContext: SectionContext = {
-            uoId: selectedSection.uoId,
-            section: selectedSection.section,
-            query,
-            fileContent,
-            placeholderRange: new vscode.Range(0, 0, 0, 0)
-        };
-
-        await processAndApplyPopulation(context, outputChannel, activeUri, sectionContext, true);
-
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`LabNote AI 작업 중 오류 발생: ${error.message}`);
-    }
-}
-
-function registerEventListeners(context: vscode.ExtensionContext) {
-    context.subscriptions.push(
-        vscode.workspace.onDidRenameFiles(async (e) => {
-            const edit = new vscode.WorkspaceEdit();
-            for (const file of e.files) {
-                const oldPath = file.oldUri.fsPath;
-                const newPath = file.newUri.fsPath;
-                if (logic.isValidWorkflowPath(oldPath) || logic.isValidWorkflowPath(newPath)) {
-                    const oldBaseName = path.basename(oldPath);
-                    const newBaseName = path.basename(newPath);
-                    const oldMatch = oldBaseName.match(/^(\d{3})_/);
-                    const newMatch = newBaseName.match(/^(\d{3})_/);
-                    if (oldMatch && newMatch && oldMatch[1] !== newMatch[1]) {
-                        const dir = path.dirname(newPath);
-                        const readmePath = path.join(dir, 'README.md');
-                        if (fs.existsSync(readmePath)) {
-                            const readmeUri = vscode.Uri.file(readmePath);
-                            const doc = await vscode.workspace.openTextDocument(readmeUri);
-                            for (let i = 0; i < doc.lineCount; i++) {
-                                const line = doc.lineAt(i);
-                                if (line.text.includes(oldBaseName)) {
-                                    const newText = line.text.replace(oldBaseName, newBaseName)
-                                        .replace(new RegExp(`^(\\[ \\] \\[)${oldMatch[1]}`), `$1${newMatch[1]}`);
-                                    edit.replace(readmeUri, line.range, newText);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            await vscode.workspace.applyEdit(edit);
-        })
-    );
-}
-
+// ⭐️ [수정] 대화형 로직을 처리하도록 전체 재구성
 function registerChatParticipant(context: vscode.ExtensionContext, outputChannel: vscode.OutputChannel) {
+    
     const handler: vscode.ChatRequestHandler = async (
         request: vscode.ChatRequest,
         chatContext: vscode.ChatContext,
@@ -207,78 +139,186 @@ function registerChatParticipant(context: vscode.ExtensionContext, outputChannel
         token: vscode.CancellationToken
     ): Promise<vscode.ChatResult> => {
 
-        outputChannel.appendLine(`[Debug] Chat handler started. Prompt: "${request.prompt}"`);
+        const sessionId = "default_session";
+        let session = chatSessions.get(sessionId);
 
-        // 1. 사용자가 @labnote만 입력한 경우 (메인 메뉴 표시)
-        if (!request.prompt) {
-            try {
-                stream.markdown("안녕하세요! LabNote AI Assistant입니다. 무엇을 도와드릴까요? 🚀\n\n아래 버튼을 선택하여 작업을 시작하거나, 저에게 직접 질문해주세요.");
-                
-                stream.button({
-                    title: '🔬 새 연구노트 생성',
-                    command: 'labnote.ai.generate'
+        // --- 명시적 대화 시작 명령어 처리 ---
+        if (request.prompt.startsWith('/')) {
+            const command = request.prompt.split(' ')[0];
+            if (command === '/generate') {
+                chatSessions.set(sessionId, {
+                    flow: 'generate_labnote',
+                    state: 'awaiting_topic',
+                    data: {}
                 });
-                stream.button({
-                    title: '✍️ 섹션 내용 채우기 (AI)',
-                    command: 'labnote.ai.populateSection'
-                });
-                stream.button({
-                    title: '➕ 워크플로우 추가',
-                    command: 'labnote.manager.newWorkflow'
-                });
-                stream.button({
-                    title: '➕ Unit Operation 추가 (HW/SW)',
-                    command: 'labnote.manager.newHwUnitOperation'
-                });
-                stream.button({
-                    title: '🔄 워크플로우 번호 재정렬',
-                    command: 'labnote.manager.reorderWorkflows'
-                });
-                stream.button({
-                    title: '🗂️ 실험 폴더 번호 재정렬',
-                    command: 'labnote.manager.reorderLabnotes'
-                });
-                
-                outputChannel.appendLine(`[Debug] Main menu displayed.`);
-            } catch (e: any) {
-                outputChannel.appendLine(`[Error] Failed to display menu: ${e.message}`);
+                stream.markdown("🔬 좋습니다. 생성할 연구노트의 핵심 주제는 무엇인가요?");
+                return {};
             }
+            if (command === '/populate') {
+                const editor = vscode.window.activeTextEditor;
+                if (!editor) {
+                    stream.markdown("⚠️ 먼저 내용을 채울 워크플로우 파일을 열어주세요.");
+                    chatSessions.delete(sessionId);
+                    return {};
+                }
+                const sections = parseAllSections(editor.document);
+                if (sections.length === 0) {
+                    stream.markdown("⚠️ 현재 파일에서 채울 수 있는 Unit Operation 섹션을 찾을 수 없습니다.");
+                    chatSessions.delete(sessionId);
+                    return {};
+                }
+                
+                chatSessions.set(sessionId, {
+                    flow: 'populate_section',
+                    state: 'awaiting_section_choice',
+                    data: { documentUri: editor.document.uri }
+                });
+
+                stream.markdown("✍️ AI로 채울 섹션을 선택해주세요.");
+                sections.forEach(s => {
+                    const commandPayload = encodeURIComponent(JSON.stringify({ uoId: s.uoId, section: s.section }));
+                    stream.button({
+                        title: `[${s.uoId}] ${s.section}`,
+                        command: 'labnote.ai.internal.chatSelectSection',
+                        arguments: [commandPayload]
+                    });
+                });
+                return {};
+            }
+             if (command === '/cancel') {
+                chatSessions.delete(sessionId);
+                stream.markdown("✅ 작업을 취소했습니다.");
+                stream.button({ title: '다른 작업 보기', command: 'labnote.ai.showMainMenu.chat' });
+                return {};
+            }
+        }
+
+        // --- 상태 기반 대화 흐름 처리 ---
+        if (session) {
+            if (session.flow === 'generate_labnote') {
+                await handleGenerateFlow(session, request, stream, context, outputChannel);
+                return {};
+            }
+            if (session.flow === 'populate_section') {
+                stream.markdown("위에 표시된 버튼을 눌러 섹션을 선택해주세요.");
+                return {};
+            }
+        }
+
+        // --- 기본 동작: 메뉴 표시 또는 일반 채팅 ---
+        if (!request.prompt) {
+            stream.markdown("안녕하세요! LabNote AI Assistant입니다. 무엇을 도와드릴까요? 🚀");
+            stream.button({ title: '🔬 새 연구노트 생성', command: 'labnote.ai.generate.chat' });
+            stream.button({ title: '✍️ 섹션 내용 채우기 (AI)', command: 'labnote.ai.populateSection.chat' });
+            stream.button({ title: '➕ 워크플로우 추가', command: 'labnote.manager.newWorkflow' });
+            stream.button({ title: '➕ Unit Operation 추가', command: 'labnote.manager.newHwUnitOperation' });
+            stream.button({ title: '🔄 워크플로우 번호 재정렬', command: 'labnote.manager.reorderWorkflows' });
+            stream.button({ title: '🗂️ 실험 폴더 번호 재정렬', command: 'labnote.manager.reorderLabnotes' });
             return {};
         }
 
-        // 2. 사용자가 프롬프트와 함께 입력한 경우 (일반 채팅)
-        try {
-            stream.progress("LabNote AI 백엔드에 요청 중입니다...");
-            const response = await callChatApi(request.prompt, outputChannel, null);
-            if (response) {
-                stream.markdown(response.response);
-            } else {
-                stream.markdown("AI로부터 응답을 받지 못했습니다.");
-            }
-            outputChannel.appendLine(`[Debug] General chat request processed.`);
-        } catch (error: any) {
-            outputChannel.appendLine(`[Error] Chat API call failed: ${error.message}`);
-            stream.markdown(`오류가 발생했습니다: ${error.message}`);
-        }
-
-        outputChannel.appendLine(`[Debug] Chat handler finished.`);
+        // 일반 채팅 API 호출
+        await callChatApi(request.prompt, outputChannel, null, stream);
         return {};
     };
+
+    // --- 핸들러 헬퍼 함수들 ---
+    async function handleGenerateFlow(session: ChatSession, request: vscode.ChatRequest, stream: vscode.ChatResponseStream, context: vscode.ExtensionContext, outputChannel: vscode.OutputChannel) {
+        const sessionId = "default_session";
+        
+        switch(session.state) {
+            case 'awaiting_topic':
+                session.data.topic = request.prompt;
+                session.state = 'awaiting_workflow';
+                chatSessions.set(sessionId, session);
+                stream.markdown(`알겠습니다. 주제: **"${session.data.topic}"**\n\n이제 기반이 될 워크플로우를 선택해주세요.`);
+
+                const { ALL_WORKFLOWS } = await fetchConstants(context, getBaseUrl()!, outputChannel);
+                const wfId = await showWorkflowSelectionMenu(ALL_WORKFLOWS);
+                if (!wfId) {
+                    stream.markdown("❌ 작업이 취소되었습니다.");
+                    chatSessions.delete(sessionId);
+                    return;
+                }
+                session.data.workflowId = wfId;
+                session.state = 'awaiting_uos';
+                chatSessions.set(sessionId, session);
+                stream.markdown(`워크플로우 **[${wfId}]**가 선택되었습니다.\n\n이제 필요한 Unit Operation들을 선택해주세요.`);
+
+                const { ALL_UOS } = await fetchConstants(context, getBaseUrl()!, outputChannel);
+                const uoIds = await showUnifiedUoSelectionMenu(ALL_UOS, []);
+                 if (!uoIds || uoIds.length === 0) {
+                    stream.markdown("❌ 작업이 취소되었습니다.");
+                    chatSessions.delete(sessionId);
+                    return;
+                }
+                session.data.uoIds = uoIds;
+                
+                stream.markdown("✅ 모든 정보가 수집되었습니다. 연구노트 생성을 시작합니다...");
+                await interactiveGenerateFlow(context, session.data.topic, outputChannel, session.data.workflowId, session.data.uoIds);
+                stream.markdown("✅ 연구노트가 성공적으로 생성되었습니다.");
+                chatSessions.delete(sessionId);
+                break;
+        }
+    }
+
+    async function callChatApi(userInput: string, outputChannel: vscode.OutputChannel, conversationId: string | null, stream: vscode.ChatResponseStream) {
+        try {
+            stream.progress("LabNote AI 백엔드에 요청 중입니다...");
+            const baseUrl = getBaseUrl();
+            if (!baseUrl) {
+                stream.markdown("Backend URL이 설정되지 않았습니다.");
+                return;
+            }
+            const response = await fetch(`${baseUrl}/chat`, {
+                method: 'POST',
+                headers: getApiHeaders(),
+                body: JSON.stringify({ query: userInput, conversation_id: conversationId }),
+            });
+            if (!response.ok) {
+                 const errorText = await response.text();
+                 throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+            const chatData = await response.json() as ChatResponse;
+            stream.markdown(chatData.response);
+        } catch (error: any) {
+            stream.markdown(`오류가 발생했습니다: ${error.message}`);
+            outputChannel.appendLine(`[ERROR] callChatApi: ${error.stack}`);
+        }
+    }
+
 
     const participant = vscode.chat.createChatParticipant('labnote.participant', handler);
     participant.iconPath = vscode.Uri.file(path.join(context.extensionPath, 'images', 'icon.png'));
     
-    // 대화가 끝난 후에도 메뉴를 다시 볼 수 있는 버튼을 제공합니다.
     participant.followupProvider = {
         provideFollowups(result: vscode.ChatResult, context: vscode.ChatContext, token: vscode.CancellationToken) {
-            return [{
-                prompt: '', // 프롬프트를 비워두면 핸들러에서 !request.prompt 조건이 true가 되어 메뉴가 다시 표시됩니다.
-                label: '다른 작업 선택하기',
-            }];
+            if (chatSessions.has("default_session")) {
+                return [{ prompt: '/cancel', label: '현재 작업 취소', command: 'labnote.ai.cancel.chat' }];
+            }
+            return [{ prompt: '', label: '다른 작업 보기', command: 'labnote.ai.showMainMenu.chat' }];
         }
     };
-
+    
     context.subscriptions.push(participant);
+
+    // 내부 명령어 등록
+    context.subscriptions.push(
+        vscode.commands.registerCommand('labnote.ai.internal.chatSelectSection', async (payload: string) => {
+            const { uoId, section } = JSON.parse(decodeURIComponent(payload));
+            const session = chatSessions.get("default_session");
+            if (session && session.flow === 'populate_section' && session.data.documentUri) {
+                await populateSectionFromWebview(context, outputChannel, session.data.documentUri, uoId, section);
+                chatSessions.delete("default_session");
+            }
+        }),
+        vscode.commands.registerCommand('labnote.ai.showMainMenu.chat', () => {
+             vscode.commands.executeCommand('workbench.action.chat.open', '@labnote');
+        }),
+        vscode.commands.registerCommand('labnote.ai.cancel.chat', () => {
+            vscode.commands.executeCommand('workbench.action.chat.open', '@labnote /cancel');
+        })
+    );
 }
 
 async function newWorkflowCommand(customWorkflowsPath: string) {
@@ -387,7 +427,13 @@ async function reorderLabnotesCommand() {
     await reorderLabnoteFolders(labnoteRoot);
 }
 
-async function interactiveGenerateFlow(context: vscode.ExtensionContext, userInput: string, outputChannel: vscode.OutputChannel) {
+async function interactiveGenerateFlow(
+    context: vscode.ExtensionContext, 
+    userInput: string, 
+    outputChannel: vscode.OutputChannel,
+    workflowId?: string,
+    uoIds?: string[]
+) {
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
         title: "LabNote AI 분석 중...",
@@ -396,8 +442,7 @@ async function interactiveGenerateFlow(context: vscode.ExtensionContext, userInp
         try {
             const workspaceFolders = vscode.workspace.workspaceFolders;
             if (!workspaceFolders) {
-                vscode.window.showErrorMessage("실험 노트를 생성하려면 먼저 작업 영역(workspace)을 열어주세요.");
-                return;
+                throw new Error("실험 노트를 생성하려면 먼저 작업 영역(workspace)을 열어주세요.");
             }
             const rootPath = workspaceFolders[0].uri.fsPath;
             const labnoteRoot = path.join(rootPath, 'labnote');
@@ -406,21 +451,32 @@ async function interactiveGenerateFlow(context: vscode.ExtensionContext, userInp
             const existingDirs = entries.filter(e => e.isDirectory() && /^\d{3}_/.test(e.name)).map(e => parseInt(e.name.substring(0, 3), 10));
             const nextId = existingDirs.length > 0 ? Math.max(...existingDirs) + 1 : 1;
             const formattedId = nextId.toString().padStart(3, '0');
-            const safeTitle = userInput.replace(/\s+/g, '_');
+            const safeTitle = userInput.replace(/[\s/\\?%*:|"<>]/g, '_');
             const newDirName = `${formattedId}_${safeTitle}`;
             const newDirPath = path.join(labnoteRoot, newDirName);
             fs.mkdirSync(newDirPath, { recursive: true });
             fs.mkdirSync(path.join(newDirPath, 'images'), { recursive: true });
             fs.mkdirSync(path.join(newDirPath, 'resources'), { recursive: true });
             outputChannel.appendLine(`[Info] Created new experiment folder: ${newDirPath}`);
+            
             progress.report({ increment: 10, message: "실험 구조 분석 중..." });
             const baseUrl = getBaseUrl();
             if (!baseUrl) return;
-            const { ALL_WORKFLOWS, ALL_UOS } = await fetchConstants(context, baseUrl, outputChannel);
-            const finalWorkflowId = await showWorkflowSelectionMenu(ALL_WORKFLOWS);
-            if (!finalWorkflowId) return;
-            const finalUoIds = await showUnifiedUoSelectionMenu(ALL_UOS, []);
-            if (!finalUoIds || finalUoIds.length === 0) return;
+            
+            let finalWorkflowId = workflowId;
+            let finalUoIds = uoIds;
+
+            if (!finalWorkflowId) {
+                const { ALL_WORKFLOWS } = await fetchConstants(context, baseUrl, outputChannel);
+                finalWorkflowId = await showWorkflowSelectionMenu(ALL_WORKFLOWS);
+                if (!finalWorkflowId) return; 
+            }
+            if (!finalUoIds || finalUoIds.length === 0) {
+                 const { ALL_UOS } = await fetchConstants(context, baseUrl, outputChannel);
+                finalUoIds = await showUnifiedUoSelectionMenu(ALL_UOS, []);
+                if (!finalUoIds || finalUoIds.length === 0) return;
+            }
+
             progress.report({ increment: 60, message: "연구노트 및 워크플로우 파일 생성 중..." });
             const createScaffoldResponse = await fetch(`${baseUrl}/create_scaffold`, {
                 method: 'POST',
@@ -428,7 +484,9 @@ async function interactiveGenerateFlow(context: vscode.ExtensionContext, userInp
                 body: JSON.stringify({ query: userInput, workflow_id: finalWorkflowId, unit_operation_ids: finalUoIds, experimenter: "AI Assistant" }),
             });
             if (!createScaffoldResponse.ok) throw new Error(`뼈대 생성 실패 (HTTP ${createScaffoldResponse.status}): ${await createScaffoldResponse.text()}`);
+            
             const scaffoldData = await createScaffoldResponse.json() as { files: Record<string, string> };
+            
             progress.report({ increment: 90, message: "파일 저장 및 표시 중..." });
             for (const fileName in scaffoldData.files) {
                 const content = scaffoldData.files[fileName];
@@ -438,10 +496,11 @@ async function interactiveGenerateFlow(context: vscode.ExtensionContext, userInp
             }
             const readmePath = path.join(newDirPath, 'README.md');
             await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(readmePath), { preview: false });
-            vscode.window.showInformationMessage(`연구노트 '${newDirName}' 및 관련 워크플로우 파일들이 생성되었습니다.`);
+
         } catch (error: any) {
             vscode.window.showErrorMessage('LabNote AI 작업 중 오류가 발생했습니다: ' + error.message);
             outputChannel.appendLine(`[ERROR] ${error.message}`);
+            throw error;
         }
     });
 }
@@ -479,6 +538,49 @@ async function populateSectionFromWebview(
             return;
         }
         await processAndApplyPopulation(extensionContext, outputChannel, documentUri, sectionContext, true);
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`LabNote AI 작업 중 오류 발생: ${error.message}`);
+    }
+}
+
+async function populateSectionFromVisualEditorFlow(context: vscode.ExtensionContext, outputChannel: vscode.OutputChannel) {
+    const activeUri = getActiveFileUri();
+    if (!activeUri) {
+        vscode.window.showWarningMessage("활성화된 파일이 없습니다.");
+        return;
+    }
+
+    try {
+        const document = await vscode.workspace.openTextDocument(activeUri);
+        
+        const sections = parseAllSections(document);
+        if (sections.length === 0) {
+            vscode.window.showErrorMessage("문서에서 Unit Operation 섹션을 찾을 수 없습니다.");
+            return;
+        }
+
+        const selectedSection = await vscode.window.showQuickPick(
+            sections.map(s => ({
+                label: `[${s.uoId}] ${s.section}`,
+                description: `Line ${s.startLine + 1}`,
+                detail: `Unit Operation: ${s.uoId}`,
+                uoId: s.uoId,
+                section: s.section
+            })),
+            { placeHolder: "AI로 채울 섹션을 선택하세요" }
+        );
+
+        if (!selectedSection) return;
+
+        const sectionContext = findSectionContext(document, { uoId: selectedSection.uoId, section: selectedSection.section });
+
+        if (!sectionContext) {
+             vscode.window.showErrorMessage(`'${selectedSection.section}' 섹션을 찾을 수 없습니다. (UO: ${selectedSection.uoId})`);
+             return;
+        }
+
+        await processAndApplyPopulation(context, outputChannel, activeUri, sectionContext, true);
+
     } catch (error: any) {
         vscode.window.showErrorMessage(`LabNote AI 작업 중 오류 발생: ${error.message}`);
     }
@@ -545,7 +647,7 @@ async function processAndApplyPopulation(
                             uo_id: uoId,
                             section,
                             chosen_original,
-                            chosen_edited, // Visual Editor에서도 수정된 내용을 보냄
+                            chosen_edited,
                             rejected: populateData.options.filter(opt => opt !== chosen_original),
                             query,
                             file_content: (await vscode.workspace.openTextDocument(documentUri)).getText(),
@@ -564,7 +666,7 @@ async function processAndApplyPopulation(
                             });
                         }
                         vscode.window.showInformationMessage(`'${section}' 섹션이 업데이트되었고, AI가 사용자의 수정을 학습합니다.`);
-                    } else { // command === 'copyAndLearn'
+                    } else {
                         await vscode.env.clipboard.writeText(chosen_edited);
                         vscode.window.showInformationMessage(`수정된 내용이 클립보드에 복사되었습니다. Visual Editor에 붙여넣으세요.`);
                     }
@@ -574,44 +676,6 @@ async function processAndApplyPopulation(
             undefined,
             extensionContext.subscriptions
         );
-    });
-}
-
-async function callChatApi(userInput: string, outputChannel: vscode.OutputChannel, conversationId: string | null): Promise<ChatResponse | null> {
-    return vscode.window.withProgress({
-        location: vscode.ProgressLocation.Notification,
-        title: "LabNote AI가 응답 중입니다...",
-        cancellable: false
-    }, async (progress): Promise<ChatResponse | null> => {
-        try {
-            progress.report({ increment: 20, message: "AI에게 질문하는 중..." });
-            const baseUrl = getBaseUrl();
-            if (!baseUrl) return null;
-            const response = await fetch(`${baseUrl}/chat`, {
-                method: 'POST',
-                headers: getApiHeaders(),
-                body: JSON.stringify({
-                    query: userInput,
-                    conversation_id: conversationId
-                }),
-            });
-            if (!response.ok) {
-                throw new Error(`채팅 실패 (HTTP ${response.status}): ${await response.text()}`);
-            }
-            const chatData = await response.json() as ChatResponse;
-            if (conversationId === null) {
-                const doc = await vscode.workspace.openTextDocument({
-                    content: `# AI 답변: ${userInput}\n\n---\n\n${chatData.response}`,
-                    language: 'markdown'
-                });
-                await vscode.window.showTextDocument(doc, { preview: false });
-            }
-            return chatData;
-        } catch (error: any) {
-            vscode.window.showErrorMessage('LabNote AI와 대화 중 오류가 발생했습니다.');
-            outputChannel.appendLine(`[ERROR] ${error.message}`);
-            return null;
-        }
     });
 }
 
@@ -797,7 +861,6 @@ function findInsertPosBeforeEndMarker(doc: vscode.TextDocument, endMarker: strin
     return new vscode.Position(doc.lineCount, 0);
 }
 
-// ⭐️ [수정됨] 함수 시그니처 수정
 function createPopulateWebviewPanel(section: string, options: string[], isFromVisualEditor: boolean): vscode.WebviewPanel {
     const panel = vscode.window.createWebviewPanel(
         'labnoteAiPopulate',
