@@ -11,13 +11,13 @@
     "Other"
   ],
   "activationEvents": [
+    "onChatParticipant:labnote.participant",
     "onCommand:labnote.ai.generate",
     "onCommand:labnote.manager.newWorkflow",
     "onCommand:labnote.manager.newHwUnitOperation",
     "onCommand:labnote.manager.newSwUnitOperation",
     "onCommand:labnote.manager.manageTemplates",
     "onCommand:labnote.ai.populateSection",
-    "onCommand:labnote.ai.chat",
     "onCommand:labnote.manager.insertTable",
     "onCommand:labnote.manager.reorderWorkflows",
     "onCommand:labnote.manager.reorderLabnotes",
@@ -59,10 +59,6 @@
       {
         "command": "labnote.ai.populateSection",
         "title": "LabNote (AI): 섹션 내용 채우기"
-      },
-      {
-        "command": "labnote.ai.chat",
-        "title": "LabNote (AI): 일반 대화 시작"
       },
       {
         "command": "labnote.manager.insertTable",

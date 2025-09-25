@@ -218,7 +218,7 @@ function registerChatParticipant(context: vscode.ExtensionContext, outputChannel
         }
 
         // 일반 채팅 API 호출
-        await callChatApi(request.prompt, outputChannel, null, stream);
+        await callChatApi(request.prompt, outputChannel, stream, null);
         return {};
     };
 
@@ -287,6 +287,34 @@ function registerChatParticipant(context: vscode.ExtensionContext, outputChannel
         }
     }
 
+async function callChatApi(userInput: string, outputChannel: vscode.OutputChannel, stream: vscode.ChatResponseStream, conversationId: string | null = null) {
+    try {
+        stream.progress("LabNote AI 백엔드에 요청 중입니다...");
+        const baseUrl = getBaseUrl();
+        if (!baseUrl) {
+            stream.markdown("오류: Backend URL이 설정되지 않았습니다.");
+            return;
+        }
+        const response = await fetch(`${baseUrl}/chat`, {
+            method: 'POST',
+            headers: getApiHeaders(),
+            body: JSON.stringify({
+                query: userInput,
+                conversation_id: conversationId
+            }),
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`채팅 실패 (HTTP ${response.status}): ${errorText}`);
+        }
+        const chatData = await response.json() as ChatResponse;
+        stream.markdown(chatData.response);
+
+    } catch (error: any) {
+        stream.markdown(`AI와 대화 중 오류가 발생했습니다: ${error.message}`);
+        outputChannel.appendLine(`[ERROR] callChatApi: ${error.stack}`);
+    }
+}
 
     const participant = vscode.chat.createChatParticipant('labnote.participant', handler);
     participant.iconPath = vscode.Uri.file(path.join(context.extensionPath, 'images', 'icon.png'));
@@ -320,34 +348,7 @@ function registerChatParticipant(context: vscode.ExtensionContext, outputChannel
         })
     );
 }
-async function callChatApi(userInput: string, outputChannel: vscode.OutputChannel, stream: vscode.ChatResponseStream, conversationId: string | null = null) {
-    try {
-        stream.progress("LabNote AI 백엔드에 요청 중입니다...");
-        const baseUrl = getBaseUrl();
-        if (!baseUrl) {
-            stream.markdown("오류: Backend URL이 설정되지 않았습니다.");
-            return;
-        }
-        const response = await fetch(`${baseUrl}/chat`, {
-            method: 'POST',
-            headers: getApiHeaders(),
-            body: JSON.stringify({
-                query: userInput,
-                conversation_id: conversationId
-            }),
-        });
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`채팅 실패 (HTTP ${response.status}): ${errorText}`);
-        }
-        const chatData = await response.json() as ChatResponse;
-        stream.markdown(chatData.response);
 
-    } catch (error: any) {
-        stream.markdown(`AI와 대화 중 오류가 발생했습니다: ${error.message}`);
-        outputChannel.appendLine(`[ERROR] callChatApi: ${error.stack}`);
-    }
-}
 
 async function newWorkflowCommand(customWorkflowsPath: string) {
     try {
