@@ -190,10 +190,38 @@ function registerChatParticipant(context, outputChannel) {
             return {};
         }
         // 일반 채팅 API 호출
-        await callChatApi(request.prompt, outputChannel, null, stream);
+        await callChatApi(request.prompt, outputChannel, stream, null);
         return {};
     };
     // --- 핸들러 헬퍼 함수들 ---
+    async function callChatApi(userInput, outputChannel, stream, conversationId = null) {
+        try {
+            stream.progress("LabNote AI 백엔드에 요청 중입니다...");
+            const baseUrl = getBaseUrl();
+            if (!baseUrl) {
+                stream.markdown("오류: Backend URL이 설정되지 않았습니다.");
+                return;
+            }
+            const response = await fetch(`${baseUrl}/chat`, {
+                method: 'POST',
+                headers: getApiHeaders(),
+                body: JSON.stringify({
+                    query: userInput,
+                    conversation_id: conversationId
+                }),
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`채팅 실패 (HTTP ${response.status}): ${errorText}`);
+            }
+            const chatData = await response.json();
+            stream.markdown(chatData.response);
+        }
+        catch (error) {
+            stream.markdown(`AI와 대화 중 오류가 발생했습니다: ${error.message}`);
+            outputChannel.appendLine(`[ERROR] callChatApi: ${error.stack}`);
+        }
+    }
     async function handleGenerateFlow(session, request, stream, context, outputChannel) {
         const sessionId = "default_session";
         switch (session.state) {
@@ -228,31 +256,6 @@ function registerChatParticipant(context, outputChannel) {
                 break;
         }
     }
-    async function callChatApi(userInput, outputChannel, conversationId, stream) {
-        try {
-            stream.progress("LabNote AI 백엔드에 요청 중입니다...");
-            const baseUrl = getBaseUrl();
-            if (!baseUrl) {
-                stream.markdown("Backend URL이 설정되지 않았습니다.");
-                return;
-            }
-            const response = await fetch(`${baseUrl}/chat`, {
-                method: 'POST',
-                headers: getApiHeaders(),
-                body: JSON.stringify({ query: userInput, conversation_id: conversationId }),
-            });
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`HTTP ${response.status}: ${errorText}`);
-            }
-            const chatData = await response.json();
-            stream.markdown(chatData.response);
-        }
-        catch (error) {
-            stream.markdown(`오류가 발생했습니다: ${error.message}`);
-            outputChannel.appendLine(`[ERROR] callChatApi: ${error.stack}`);
-        }
-    }
     const participant = vscode.chat.createChatParticipant('labnote.participant', handler);
     participant.iconPath = vscode.Uri.file(path.join(context.extensionPath, 'images', 'icon.png'));
     participant.followupProvider = {
@@ -277,34 +280,6 @@ function registerChatParticipant(context, outputChannel) {
     }), vscode.commands.registerCommand('labnote.ai.cancel.chat', () => {
         vscode.commands.executeCommand('workbench.action.chat.open', '@labnote /cancel');
     }));
-}
-async function callChatApi(userInput, outputChannel, stream, conversationId = null) {
-    try {
-        stream.progress("LabNote AI 백엔드에 요청 중입니다...");
-        const baseUrl = getBaseUrl();
-        if (!baseUrl) {
-            stream.markdown("오류: Backend URL이 설정되지 않았습니다.");
-            return;
-        }
-        const response = await fetch(`${baseUrl}/chat`, {
-            method: 'POST',
-            headers: getApiHeaders(),
-            body: JSON.stringify({
-                query: userInput,
-                conversation_id: conversationId
-            }),
-        });
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`채팅 실패 (HTTP ${response.status}): ${errorText}`);
-        }
-        const chatData = await response.json();
-        stream.markdown(chatData.response);
-    }
-    catch (error) {
-        stream.markdown(`AI와 대화 중 오류가 발생했습니다: ${error.message}`);
-        outputChannel.appendLine(`[ERROR] callChatApi: ${error.stack}`);
-    }
 }
 async function newWorkflowCommand(customWorkflowsPath) {
     try {
